@@ -1,0 +1,70 @@
+{
+  "app_title": "ГБОУ Школа 1580",
+  "scan_settings": {
+    "dpi": 300,
+    "color_mode": "grayscale",
+    "duplex": true,
+    "max_sides_per_sheet": 2,
+    "page_size": "a4",
+    "auto_border": true
+  },
+  "special_cases": {
+    "description": "Параметры для подсчёта особых случаев. Измените значения под свои правила.",
+    "count_on_low_confidence": true,
+    "low_confidence_threshold": 0.65,
+    "count_on_unreadable": true,
+    "count_on_damaged": true,
+    "count_on_empty": true,
+    "count_on_multiple_marks": false,
+    "custom_labels": {
+      "low_confidence": "Низкая уверенность распознавания",
+      "unreadable": "Бланк не читается",
+      "damaged": "Повреждённый бланк",
+      "empty": "Пустой бланк",
+      "multiple_marks": "Несколько отметок в одной ячейке"
+    }
+  },
+  "display": {
+    "initial_zoom": 1.0,
+    "zoom_step": 0.1,
+    "min_zoom": 0.3,
+    "max_zoom": 3.0,
+    "thumbnail_spacing": 16
+  },
+  "blank_processing": {
+    "min_markers_for_crop": 4,
+    "crop_margin_ratio": 0.35,
+    "crop_margin_px": 0,
+    "marker_min_area_ratio": 0.00008,
+    "marker_max_area_ratio": 0.003,
+    "marker_min_aspect": 0.65,
+    "marker_max_aspect": 1.35,
+    "marker_min_solidity": 0.75,
+    "marker_dedupe_factor": 0.6,
+    "qr_roi_width_ratio": 0.22,
+    "qr_roi_height_ratio": 0.18,
+    "try_pyzbar": false
+  },
+  "export": {
+    "image_format": "jpg",
+    "jpeg_quality": 92
+  },
+  "auditorium": {
+    "id": "default",
+    "auto_process_after_scan": false,
+    "data_paths": {
+      "operator_links": "operator_links.json",
+      "manual_review_queue": "manual_review_queue.json",
+      "manual_history": "manual_history.json",
+      "audit_log": "audit_log.json",
+      "issued_blanks": "issued_blanks.json"
+    }
+  },
+  "ui": {
+    "accent": "#2563eb",
+    "background": "#f0f2f5",
+    "sidebar": "#ffffff",
+    "text": "#1e293b",
+    "muted": "#64748b"
+  }
+}

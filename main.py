@@ -33,6 +33,12 @@ from scanner_wia import (
     scan_image_system_dialog,
     scan_sheet_sides,
 )
+from scanner_twain import (
+    TwainDriver,
+    TwainError,
+    is_twain_available,
+    get_twain_driver,
+)
 from station_integration import (
     apply_links_to_blanks,
     can_link_blanks,
@@ -583,6 +589,9 @@ class ScanStationApp:
 
         self.scanner: Optional[ScannerInfo] = None
         self._scanner_caps: dict = {}
+        self._twain_driver: Optional[TwainDriver] = None
+        self._use_twain: bool = False
+        self._init_twain()
         self.recognizer = Recognizer()
         self.blanks: List[ScannedBlank] = []
         self.zoom = float(self.display_cfg.get("initial_zoom", 1.0))
@@ -982,7 +991,53 @@ class ScanStationApp:
             return
         self._run_chain_processing()
 
+    def _init_twain(self) -> None:
+        twain_cfg = self.config.get("twain", {})
+        if not twain_cfg.get("enabled", True):
+            return
+        self._twain_driver = get_twain_driver()
+        if self._twain_driver and self._twain_driver.available:
+            self._use_twain = twain_cfg.get("prefer_over_wia", True)
+
+    def _scan_twain_worker(self) -> None:
+        try:
+            if not self._twain_driver:
+                raise TwainError("TWAIN driver not initialized")
+
+            settings = self.config.get("scan_settings", {})
+            dpi = int(settings.get("dpi", 300))
+            color_mode = settings.get("color_mode", "grayscale")
+            duplex = bool(settings.get("duplex", True))
+
+            def on_progress(msg: str) -> None:
+                self.root.after(0, lambda: self._set_status(msg))
+
+            raw_images = self._twain_driver.scan(
+                dpi=dpi,
+                duplex=duplex,
+                color_mode=color_mode,
+                on_progress=on_progress,
+            )
+
+            self.root.after(0, lambda: self._on_scan_complete(raw_images))
+
+        except TwainError as exc:
+            self.root.after(0, lambda: self._notify_error("TWAIN", str(exc)))
+        except Exception as exc:
+            self.root.after(0, lambda: self._notify_error("Сканирование", str(exc)))
+        finally:
+            self.root.after(0, self._finish_scan)
+
     def _startup_select_scanner(self) -> None:
+        if self._use_twain and self._twain_driver:
+            if self._twain_driver.start():
+                self._scanner_label.config(text="TWAIN · готов")
+                self._scan_btn.config(state=tk.NORMAL)
+                self._set_status("TWAIN драйвер активен")
+                return
+            else:
+                self._use_twain = False
+
         scanners = find_scanners()
         if not scanners:
             if not messagebox.askyesno(
@@ -1068,7 +1123,17 @@ class ScanStationApp:
             )
 
     def _on_scan_click(self) -> None:
-        if self._scanning or self.scanner is None:
+        if self._scanning:
+            return
+
+        if self._use_twain and self._twain_driver and self._twain_driver.available:
+            self._scanning = True
+            self._scan_btn.config(state=tk.DISABLED)
+            self._set_status("TWAIN: запуск сканирования...")
+            threading.Thread(target=self._scan_twain_worker, daemon=True).start()
+            return
+
+        if self.scanner is None:
             return
 
         caps = self._scanner_caps or get_scanner_capabilities(self.scanner)
@@ -1712,8 +1777,15 @@ class ScanStationApp:
         self._zoom_label.config(text=f"{int(self.zoom * 100)}%")
         self._refresh_all_thumbnails()
 
+    def _cleanup(self) -> None:
+        if self._twain_driver:
+            self._twain_driver.stop()
+
     def run(self) -> None:
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self._cleanup()
 
 
 def main() -> None:

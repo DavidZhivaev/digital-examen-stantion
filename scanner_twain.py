@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, List, Optional
+
+from PIL import Image
+
+from scanner_shm import (
+    CMD_LIST,
+    CMD_SCAN,
+    CMD_STOP,
+    CMD_NONE,
+    STATE_ERROR,
+    STATE_IDLE,
+    STATE_IMAGE_READY,
+    STATE_SCANNING,
+    ERROR_NO_DEVICE,
+    ERROR_PAPER_JAM,
+    ERROR_COVER_OPEN,
+    ERROR_TIMEOUT,
+    ERROR_CANCELLED,
+    SharedMemoryScanner,
+    SHM_NAME,
+)
+
+
+class TwainError(Exception):
+    pass
+
+
+class TwainDeviceNotFoundError(TwainError):
+    pass
+
+
+class TwainPaperJamError(TwainError):
+    pass
+
+
+class TwainCoverOpenError(TwainError):
+    pass
+
+
+class TwainTimeoutError(TwainError):
+    pass
+
+
+class TwainCancelledError(TwainError):
+    pass
+
+
+class TwainNotAvailableError(TwainError):
+    pass
+
+
+ERROR_EXCEPTIONS = {
+    ERROR_NO_DEVICE: TwainDeviceNotFoundError,
+    ERROR_PAPER_JAM: TwainPaperJamError,
+    ERROR_COVER_OPEN: TwainCoverOpenError,
+    ERROR_TIMEOUT: TwainTimeoutError,
+    ERROR_CANCELLED: TwainCancelledError,
+}
+
+
+@dataclass
+class TwainScannerInfo:
+    device_id: str
+    name: str
+    supports_duplex: bool = False
+    supports_adf: bool = False
+
+
+class TwainDriver:
+    def __init__(self, exe_path: Path, shm_name: str = SHM_NAME):
+        self._exe = exe_path
+        self._shm_name = shm_name
+        self._shm = SharedMemoryScanner(shm_name)
+        self._process: Optional[subprocess.Popen] = None
+        self._started = False
+
+    @property
+    def available(self) -> bool:
+        return self._exe.exists()
+
+    @property
+    def running(self) -> bool:
+        if self._process is None:
+            return False
+        return self._process.poll() is None
+
+    def start(self, timeout: float = 5.0) -> bool:
+        if not self.available:
+            return False
+
+        if self.running:
+            return True
+
+        self._shm.create()
+
+        try:
+            self._process = subprocess.Popen(
+                [str(self._exe), "--shm", self._shm_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except OSError:
+            self._shm.close()
+            return False
+
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
+            if self._process.poll() is not None:
+                self._shm.close()
+                return False
+            try:
+                ctrl = self._shm.get_control()
+                if ctrl.state == STATE_IDLE:
+                    self._started = True
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.1)
+
+        self.stop()
+        return False
+
+    def stop(self) -> None:
+        if self._process is not None:
+            try:
+                self._shm.send_command(CMD_STOP)
+                self._process.wait(timeout=3)
+            except Exception:
+                self._process.kill()
+                self._process.wait()
+            self._process = None
+
+        self._shm.close()
+        self._started = False
+
+    def list_scanners(self, timeout: float = 10.0) -> List[TwainScannerInfo]:
+        if not self.running:
+            if not self.start():
+                return []
+
+        self._shm.send_command(CMD_LIST)
+
+        try:
+            self._shm.wait_state([STATE_IDLE], timeout=timeout)
+        except TimeoutError:
+            return []
+
+        self._shm.acknowledge()
+        return []
+
+    def scan(
+        self,
+        device_id: str = "",
+        dpi: int = 300,
+        duplex: bool = True,
+        color_mode: str = "grayscale",
+        timeout_per_page: float = 60.0,
+        on_page: Optional[Callable[[Image.Image, int], None]] = None,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> List[Image.Image]:
+        if not self.running:
+            if not self.start():
+                raise TwainNotAvailableError("TWAIN driver not available")
+
+        channels = 1 if color_mode == "grayscale" else 3
+
+        self._shm.send_command(
+            CMD_SCAN,
+            device_id=device_id,
+            dpi=dpi,
+            duplex=1 if duplex else 0,
+            image_channels=channels,
+        )
+
+        images: List[Image.Image] = []
+
+        while True:
+            if on_progress:
+                on_progress(f"Waiting for page {len(images) + 1}...")
+
+            try:
+                ctrl = self._shm.wait_state(
+                    [STATE_IMAGE_READY, STATE_IDLE, STATE_ERROR],
+                    timeout=timeout_per_page,
+                )
+            except TimeoutError:
+                raise TwainTimeoutError("Scan timeout")
+
+            if ctrl.state == STATE_ERROR:
+                exc_class = ERROR_EXCEPTIONS.get(ctrl.error_code, TwainError)
+                msg = ctrl.error_message.decode("utf-8", errors="replace")
+                raise exc_class(msg or f"Error code {ctrl.error_code}")
+
+            if ctrl.state == STATE_IDLE:
+                break
+
+            if ctrl.state == STATE_IMAGE_READY:
+                img = self._shm.read_current_image()
+                if img is not None:
+                    images.append(img)
+                    if on_page:
+                        on_page(img, ctrl.image_index)
+                    if on_progress:
+                        on_progress(f"Received page {ctrl.image_index + 1}")
+                self._shm.acknowledge()
+
+        return images
+
+    def cancel(self) -> None:
+        if self.running:
+            self._shm.send_command(CMD_STOP)
+
+
+def find_twain_exe() -> Optional[Path]:
+    candidates = [
+        Path(__file__).parent / "bin" / "twain_driver.exe",
+        Path(__file__).parent / "twain_driver.exe",
+        Path("C:/Program Files/TwainDriver/twain_driver.exe"),
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+_driver_instance: Optional[TwainDriver] = None
+
+
+def get_twain_driver() -> Optional[TwainDriver]:
+    global _driver_instance
+    if _driver_instance is not None:
+        return _driver_instance
+
+    exe = find_twain_exe()
+    if exe is None:
+        return None
+
+    _driver_instance = TwainDriver(exe)
+    return _driver_instance
+
+
+def is_twain_available() -> bool:
+    driver = get_twain_driver()
+    return driver is not None and driver.available

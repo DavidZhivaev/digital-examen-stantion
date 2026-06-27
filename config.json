@@ -66,5 +66,12 @@
     "sidebar": "#ffffff",
     "text": "#1e293b",
     "muted": "#64748b"
+  },
+  "twain": {
+    "enabled": true,
+    "exe_path": "bin/twain_driver.exe",
+    "shm_size_mb": 50,
+    "prefer_over_wia": true,
+    "scan_timeout_seconds": 60
   }
 }

@@ -59,6 +59,8 @@ from station_integration import (
     status_display,
 )
 
+from scanner_hal_wrapper import HardwareScanner, HAL_AVAILABLE
+
 CONFIG_PATH = Path(__file__).parent / "config.json"
 APP_TITLE = "ГБОУ Школа 1580"
 BASE_DIR = Path(__file__).parent
@@ -591,6 +593,8 @@ class ScanStationApp:
         self._scanner_caps: dict = {}
         self._twain_driver: Optional[TwainDriver] = None
         self._use_twain: bool = False
+        self._hw_scanner: Optional[HardwareScanner] = None
+        self._use_hal: bool = False
         self._init_twain()
         self.recognizer = Recognizer()
         self.blanks: List[ScannedBlank] = []
@@ -1757,11 +1761,30 @@ class ScanStationApp:
                     padx=spacing // 2, pady=spacing // 2,
                     sticky=tk.N,
                 )
-
-        self._selected_ids = {uid for uid in self._selected_ids if any(b.uid == uid for b in self.blanks)}
-        self._update_selection_label()
-        self._refresh_blank_borders()
-        self._on_frame_configure()
+    def _init_scanners(self) -> None:
+        if HAL_AVAILABLE:
+            try:
+                self._hw_scanner = HardwareScanner()
+                self._use_hal = True
+                return
+            except Exception:
+                pass
+        twain_cfg = self.config.get("twain", {})
+        if twain_cfg.get("enabled", True):
+            self._twain_driver = get_twain_driver()
+            if self._twain_driver and self._twain_driver.available:
+                self._use_twain = True
+                return
+    def _scan_hal_worker(self) -> None:
+        try:
+            images = self._hw_scanner.scan_batch(
+                on_page=lambda img, idx: self.root.after(
+                    0, self._update_progress, f"Page {idx + 1}"
+                )
+            )
+            self.root.after(0, self._on_scan_complete, images)
+        except Exception as e:
+            self.root.after(0, self._on_scan_error, str(e))
 
     def _zoom_in(self) -> None:
         step = float(self.display_cfg.get("zoom_step", 0.1))

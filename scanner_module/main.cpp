@@ -57,19 +57,17 @@ void ProcessScannedBlank(const cv::Mat& documentFrame) noexcept {
 			bufferManager
 		};
 
-		py::object pythonScript{py::module_::import("recognizer")};
+		py::object blankProcessor{py::module_::import("blank_processor")};
+		py::object result{blankProcessor.attr("process_scanned_blank")(numpyArray)};
 
-		py::object pythonResult{pythonScript.attr("some_func")(numpyArray)};
-
-		std::string cppResultString{pythonResult.cast<std::string>()};
-		std::cout << "[Core C++] Результат: " << cppResultString << '\n';
+		std::cout << "[Core C++] Blank processed successfully\n";
 
 	} catch (const py::error_already_set& e) {
-		std::cerr << "[Python Error] Ошибка в модели анализа бланков: " << e.what() << '\n';
+		std::cerr << "[Python Error] " << e.what() << '\n';
 	} catch (const std::exception& e) {
-		std::cerr << "[Exception] Непредвиденная ошибка: " << e.what() << '\n';
+		std::cerr << "[Exception] " << e.what() << '\n';
 	} catch (...) {
-		std::cerr << "[Fatal] Неизвестная ошибка в ProcessScannedBlank\n";
+		std::cerr << "[Fatal] Unknown error in ProcessScannedBlank\n";
 	}
 }
 

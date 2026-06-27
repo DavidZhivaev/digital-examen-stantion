@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
+option(BUILD_PYTHON_MODULE "Build Python extension module (scanner_hal)" ON)
 option(ENABLE_INSTALL "Enable installation rules" ON)
 option(ENABLE_PACKAGING "Enable CPack packaging" ON)
 
@@ -159,6 +160,41 @@ else()
     target_link_libraries(scanner_app PRIVATE ${SANE_LIBRARY})
 endif()
 
+if(BUILD_PYTHON_MODULE)
+    pybind11_add_module(scanner_hal python_bindings.cpp)
+
+    target_include_directories(scanner_hal PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${OpenCV_INCLUDE_DIRS}
+    )
+
+    if(WIN32)
+        target_include_directories(scanner_hal PRIVATE ${DTWAIN_INCLUDE_DIR})
+    else()
+        target_include_directories(scanner_hal PRIVATE ${SANE_INCLUDE_DIR})
+    endif()
+
+    target_link_libraries(scanner_hal PRIVATE ${OpenCV_LIBS})
+
+    if(WIN32)
+        target_link_libraries(scanner_hal PRIVATE ${DTWAIN_LIBRARY})
+    else()
+        target_link_libraries(scanner_hal PRIVATE ${SANE_LIBRARY})
+    endif()
+
+    set_target_properties(scanner_hal PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    )
+
+    if(MSVC)
+        target_compile_options(scanner_hal PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(scanner_hal PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    message(STATUS "Python module scanner_hal will be built")
+endif()
+
 if(MSVC)
     target_compile_options(scanner_app PRIVATE
         /W4
@@ -195,6 +231,13 @@ if(ENABLE_INSTALL)
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/scanner_module
         COMPONENT development
     )
+
+    if(BUILD_PYTHON_MODULE)
+        install(TARGETS scanner_hal
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT runtime
+        )
+    endif()
 
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/recognizer.py")
         install(FILES recognizer.py
@@ -312,6 +355,7 @@ else()
 endif()
 message(STATUS "")
 message(STATUS "Options:")
+message(STATUS "  Python module: ${BUILD_PYTHON_MODULE}")
 message(STATUS "  Install: ${ENABLE_INSTALL}")
 message(STATUS "  Packaging: ${ENABLE_PACKAGING}")
 if(ENABLE_INSTALL)

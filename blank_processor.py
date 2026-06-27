@@ -76,10 +76,10 @@ def _parse_blank_id_digits(text: str) -> Optional[int]:
     digits = "".join(ch for ch in text if ch.isdigit())
     if len(digits) == 13 and _valid_blank_id(int(digits)):
         return int(digits)
-    if len(digits) == 12:
-        candidate = int(digits)
-        if _valid_blank_id(candidate):
-            return candidate
+    # Примечание: 12-значные числа не могут пройти _valid_blank_id,
+    # т.к. _BLANK_ID_MIN = 1_000_000_000_000 — это 13 цифр.
+    # Если диапазон изменится, эту ветку нужно раскомментировать
+    # и скорректировать _BLANK_ID_MIN / _BLANK_ID_MAX.
     return None
 
 
@@ -221,30 +221,108 @@ def _dedupe_markers(markers: List[_Marker], cfg: Dict[str, Any]) -> List[_Marker
     return kept
 
 
-def _assign_corner_roles(markers: List[_Marker]) -> Optional[Dict[str, _Marker]]:
-    """Назначает tl/tr/bl/br по положению на изображении (y вниз)."""
+def _filter_peripheral_markers(
+    markers: List[_Marker],
+    width: int,
+    height: int,
+    margin_ratio: float = 0.25,
+) -> List[_Marker]:
+    """Оставляет кандидатов в угловых зонах листа (не клеточки сетки посередине)."""
+    if len(markers) <= 6:
+        return markers
+
+    mx = width * margin_ratio
+    my = height * margin_ratio
+    kept = [
+        m
+        for m in markers
+        if (m.cx <= mx or m.cx >= width - mx) and (m.cy <= my or m.cy >= height - my)
+    ]
+    return kept if len(kept) >= 4 else markers
+
+
+def _filter_registration_markers(
+    markers: List[_Marker],
+    width: int,
+    height: int,
+    cfg: Dict[str, Any],
+) -> List[_Marker]:
+    pool = _filter_peripheral_markers(
+        markers,
+        width,
+        height,
+        float(cfg.get("marker_corner_margin_ratio", 0.25)),
+    )
+    if len(markers) <= 8:
+        return pool
+
+    areas = sorted((m.area for m in pool), reverse=True)
+    if len(areas) < 4:
+        return pool
+
+    ref = float(np.median(areas[:4]))
+    lo = ref * float(cfg.get("marker_size_min_ratio", 0.55))
+    hi = ref * float(cfg.get("marker_size_max_ratio", 1.8))
+    sized = [m for m in pool if lo <= m.area <= hi]
+    return sized if len(sized) >= 4 else pool
+
+
+def _assign_corner_roles(
+    markers: List[_Marker],
+    width: int,
+    height: int,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, _Marker]]:
+    """
+    Назначает tl/tr/bl/br по экстремальным точкам четырёхугольника.
+
+    Старый алгоритм «2 верхних + 2 нижних по y» ломался на титульнике:
+    снизу 4 маркера в одном ряду (bl, bc1, bc2, br), и br принимали за bc1.
+    """
     if len(markers) < 4:
         return None
 
-    pts = sorted(markers, key=lambda m: m.cy)
-    top = sorted(pts[:2], key=lambda m: m.cx)
-    bottom = sorted(pts[-2:], key=lambda m: m.cx)
-    return {"tl": top[0], "tr": top[1], "bl": bottom[0], "br": bottom[1]}
+    pool = _filter_registration_markers(markers, width, height, cfg or {})
+
+    tl = min(pool, key=lambda m: m.cx + m.cy)
+    tr = max(pool, key=lambda m: m.cx - m.cy)
+    bl = min(pool, key=lambda m: m.cx - m.cy)
+    br = max(pool, key=lambda m: m.cx + m.cy)
+
+    roles = {"tl": tl, "tr": tr, "bl": bl, "br": br}
+    if len({id(v) for v in roles.values()}) < 4:
+        pts = sorted(pool, key=lambda m: m.cy)
+        top = sorted(pts[:2], key=lambda m: m.cx)
+        bottom = sorted(pts[-2:], key=lambda m: m.cx)
+        roles = {"tl": top[0], "tr": top[1], "bl": bottom[0], "br": bottom[1]}
+    return roles
 
 
-def _pick_corner_markers(markers: List[_Marker], min_count: int = 4) -> List[_Marker]:
-    roles = _assign_corner_roles(markers)
+def _pick_corner_markers(
+    markers: List[_Marker],
+    width: int,
+    height: int,
+    cfg: Optional[Dict[str, Any]] = None,
+    min_count: int = 4,
+) -> List[_Marker]:
+    roles = _assign_corner_roles(markers, width, height, cfg)
     if roles is None:
         return markers[:max(min_count, len(markers))]
     return [roles["tl"], roles["tr"], roles["bl"], roles["br"]]
 
 
-def _markers_for_crop(markers: List[_Marker], qr_info: Optional[QrPayload]) -> List[_Marker]:
+def _markers_for_crop(
+    markers: List[_Marker],
+    width: int,
+    height: int,
+    cfg: Dict[str, Any],
+    qr_info: Optional[QrPayload],
+) -> List[_Marker]:
     if not markers:
         return []
     corner_only = qr_info.corner_only if qr_info and qr_info.valid else False
     if corner_only or len(markers) > 4:
-        return _pick_corner_markers(markers, min_count=4)
+        return _pick_corner_markers(markers, width, height, cfg, min_count=4)
     return markers
 
 
@@ -333,9 +411,9 @@ def crop_by_markers(
     cfg: Dict[str, Any],
     qr_info: Optional[QrPayload] = None,
 ) -> Tuple[Optional[np.ndarray], List[_Marker]]:
+    h, w = bgr.shape[:2]
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     all_markers = _find_square_markers(gray, cfg)
-    crop_markers = _markers_for_crop(all_markers, qr_info)
 
     min_required = 4
     if qr_info and qr_info.valid:
@@ -344,7 +422,7 @@ def crop_by_markers(
     if len(all_markers) < 4:
         return None, all_markers
 
-    corners = _assign_corner_roles(crop_markers)
+    corners = _assign_corner_roles(all_markers, w, h, cfg)
     if corners is None:
         return None, all_markers
 
@@ -366,13 +444,16 @@ def _infer_type_code(
     qr_info: Optional[QrPayload],
     markers: List[_Marker],
     sheet_part: int,
+    width: int,
+    height: int,
+    cfg: Dict[str, Any],
 ) -> str:
     if qr_info and qr_info.type_code in CHAIN_TYPE_CODES:
         return qr_info.type_code
     if qr_info and qr_info.type_code:
         return qr_info.type_code
 
-    corners = _assign_corner_roles(_pick_corner_markers(markers, 4)) if markers else None
+    corners = _assign_corner_roles(markers, width, height, cfg) if markers else None
     scale_guess = _estimate_scale(corners) if corners else 1.0
     bottom_extra = _count_bottom_markers(markers, scale_guess) if markers else 0
     if bottom_extra >= 2 or len(markers) >= 6:
@@ -422,8 +503,11 @@ def _resolve_identity(
     barcode_id: Optional[int],
     markers: List[_Marker],
     sheet_part: int,
+    width: int,
+    height: int,
+    cfg: Dict[str, Any],
 ) -> Tuple[Optional[QrPayload], Optional[int], str, bool]:
-    type_code = _infer_type_code(qr_info, markers, sheet_part)
+    type_code = _infer_type_code(qr_info, markers, sheet_part, width, height, cfg)
     qr_valid = bool(qr_info and qr_info.valid)
     qr_blank_id = qr_info.blank_id if qr_info and qr_valid and qr_info.blank_id is not None else None
 
@@ -470,6 +554,7 @@ def process_scanned_blank(
     """
     cfg = (config or {}).get("blank_processing", {})
     bgr = _pil_to_cv(image)
+    img_h, img_w = bgr.shape[:2]
 
     has_qr, qr_data = _detect_qr(bgr, cfg)
     qr_info = parse_qr_data(qr_data) if has_qr and qr_data else None
@@ -496,7 +581,13 @@ def process_scanned_blank(
         has_barcode, barcode_id = _detect_barcode(bgr, cfg)
 
     qr_info, stored_barcode, id_source, is_corrupted = _resolve_identity(
-        qr_info, barcode_id if has_barcode else None, markers, sheet_part,
+        qr_info,
+        barcode_id if has_barcode else None,
+        markers,
+        sheet_part,
+        img_w,
+        img_h,
+        cfg,
     )
 
     if has_markers and cropped is not None:

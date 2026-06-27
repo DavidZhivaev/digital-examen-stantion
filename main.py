@@ -583,10 +583,15 @@ class ScanStationApp:
 
         self.scanner: Optional[ScannerInfo] = None
         self._scanner_caps: dict = {}
-        self.recognizer = Recognizer()
+        self.recognizer = Recognizer(
+            crop_margin_ratio=float(
+                self.config.get("blank_processing", {}).get("crop_margin_ratio", 0.35)
+            ),
+        )
         self.blanks: List[ScannedBlank] = []
         self.zoom = float(self.display_cfg.get("initial_zoom", 1.0))
         self._scanning = False
+        self._scan_mode = ""
         self._processing = False
         self.auditorium_result: Optional[Dict[str, Any]] = None
         self.diversion_active = False
@@ -661,10 +666,10 @@ class ScanStationApp:
 
             recognition = self.recognizer.recognize(
                 processed.image,
-                blank_type=(
-                    processed.qr_info.type_code
-                    if processed.qr_info
-                    else ""
+                blank_type=self._recognition_blank_type(
+                    self._scan_mode,
+                    part_idx,
+                    processed.qr_info.type_code if processed.qr_info else "",
                 ),
             )
 
@@ -673,12 +678,13 @@ class ScanStationApp:
                 self.config,
             )
 
+            side_labels = ["Лицевая", "Оборот"]
+            side_label = side_labels[part_idx - 1] if part_idx <= len(side_labels) else f"Сторона {part_idx}"
             results.append(
                 {
                     "image": processed.image,
                     "is_special": special,
                     "reasons": reasons,
-                    "scan_batch_id": batch_id,
                     "qr_data": processed.qr_data,
                     "qr_info": processed.qr_info,
                     "barcode_id": processed.barcode_id,
@@ -686,7 +692,7 @@ class ScanStationApp:
                     "is_corrupted": processed.is_corrupted,
                     "has_markers": processed.has_markers,
                     "process_note": processed.reason,
-                    "side_label": "Лицевая",
+                    "side_label": side_label,
                     "sheet_part": part_idx,
                     "recognition": recognition,
                 }
@@ -768,11 +774,17 @@ class ScanStationApp:
         self._scanner_label = ttk.Label(left_wrap, text="Сканер не выбран", style="Muted.TLabel", wraplength=228)
         self._scanner_label.pack(anchor=tk.W, pady=(0, 8))
 
-        self._scan_btn = ttk.Button(
-            left_wrap, text="Сканировать", style="Primary.TButton",
-            command=self._on_scan_click, state=tk.DISABLED,
+        self._scan_blank_btn = ttk.Button(
+            left_wrap, text="Сканировать бланк решений", style="Primary.TButton",
+            command=self._on_scan_blank_click, state=tk.DISABLED,
         )
-        self._scan_btn.pack(fill=tk.X, pady=(0, 10))
+        self._scan_blank_btn.pack(fill=tk.X, pady=(0, 6))
+
+        self._scan_titul_btn = ttk.Button(
+            left_wrap, text="Сканировать титульный лист", style="Primary.TButton",
+            command=self._on_scan_titul_click, state=tk.DISABLED,
+        )
+        self._scan_titul_btn.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Separator(left_wrap, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 8))
 
@@ -1008,7 +1020,7 @@ class ScanStationApp:
         self._scanner_caps = get_scanner_capabilities(scanner)
         duplex_txt = "дуплекс ✓" if self._scanner_caps.get("duplex") else "дуплекс ✗"
         self._scanner_label.config(text=f"{self.scanner.name[:24]} · {duplex_txt}")
-        self._scan_btn.config(state=tk.NORMAL)
+        self._set_scan_buttons_state(tk.NORMAL)
         if self._scanner_caps.get("duplex"):
             self._set_status("Сканер готов · А4 · ч/б · дуплекс")
         else:
@@ -1038,10 +1050,24 @@ class ScanStationApp:
         elif self.scanner is None:
             self._set_status("Сканер не выбран")
 
+    @staticmethod
+    def _recognition_blank_type(mode: str, sheet_part: int, qr_type: str) -> str:
+        if mode == "titul":
+            return "titul"
+        if mode == "blank":
+            return "blan1" if sheet_part == 1 else "blan2"
+        return qr_type
+
     def _finish_scan(self):
         self._scanning = False
-        self._scan_btn.config(state=tk.NORMAL)
+        self._scan_mode = ""
+        self._set_scan_buttons_state(tk.NORMAL)
         self._set_status("Готово")
+
+    def _set_scan_buttons_state(self, state: str) -> None:
+        if self.scanner is not None:
+            self._scan_blank_btn.config(state=state)
+            self._scan_titul_btn.config(state=state)
             
     def _scan_system_worker(self):
         try:
@@ -1067,16 +1093,23 @@ class ScanStationApp:
                 self._finish_scan,
             )
 
-    def _on_scan_click(self) -> None:
+    def _on_scan_blank_click(self) -> None:
+        self._start_scan("blank")
+
+    def _on_scan_titul_click(self) -> None:
+        self._start_scan("titul")
+
+    def _start_scan(self, mode: str) -> None:
         if self._scanning or self.scanner is None:
             return
 
         caps = self._scanner_caps or get_scanner_capabilities(self.scanner)
 
-        if not caps.get("duplex"):
+        if mode == "blank" and not caps.get("duplex"):
             self._scanning = True
-            self._scan_btn.config(state=tk.DISABLED)
-            self._set_status("Ожидание сканирования...")
+            self._scan_mode = mode
+            self._set_scan_buttons_state(tk.DISABLED)
+            self._set_status("Ожидание сканирования бланка...")
 
             threading.Thread(
                 target=self._scan_system_worker,
@@ -1085,17 +1118,19 @@ class ScanStationApp:
             return
 
         self._scanning = True
-        self._scan_btn.config(state=tk.DISABLED)
-        self._set_status("Сканирование...")
-        threading.Thread(target=self._scan_worker, daemon=True).start()
+        self._scan_mode = mode
+        self._set_scan_buttons_state(tk.DISABLED)
+        label = "титульного листа" if mode == "titul" else "бланка решений"
+        self._set_status(f"Сканирование {label}...")
+        threading.Thread(target=self._scan_worker, kwargs={"mode": mode}, daemon=True).start()
 
-    def _scan_worker(self) -> None:
+    def _scan_worker(self, mode: str = "blank") -> None:
         try:
             settings = self.config.get("scan_settings", {})
             dpi = int(settings.get("dpi", 300))
             color_mode = settings.get("color_mode", "grayscale")
-            duplex = bool(settings.get("duplex", True))
-            max_sides = int(settings.get("max_sides_per_sheet", 2))
+            duplex = bool(settings.get("duplex", True)) if mode == "blank" else False
+            max_sides = int(settings.get("max_sides_per_sheet", 2)) if mode == "blank" else 1
             page_size = str(settings.get("page_size", "a4"))
             auto_border = bool(settings.get("auto_border", True))
 
@@ -1107,7 +1142,7 @@ class ScanStationApp:
                 max_sides=max_sides,
                 page_size=page_size,
                 auto_border=auto_border,
-                require_duplex=True,
+                require_duplex=mode == "blank",
             )
 
             side_labels = ["Лицевая", "Оборот"]
@@ -1122,7 +1157,11 @@ class ScanStationApp:
 
                 recognition = self.recognizer.recognize(
                     processed.image,
-                    blank_type=processed.qr_info.type_code if processed.qr_info and processed.qr_info.type_code else "",
+                    blank_type=self._recognition_blank_type(
+                        mode,
+                        part_idx,
+                        processed.qr_info.type_code if processed.qr_info and processed.qr_info.type_code else "",
+                    ),
                 )
                 is_special, reasons = evaluate_special_case(recognition, self.config)
                 side_label = side_labels[part_idx - 1] if part_idx <= len(side_labels) else f"Сторона {part_idx}"
@@ -1153,13 +1192,15 @@ class ScanStationApp:
 
     def _on_scan_duplex_error(self, message: str) -> None:
         self._scanning = False
-        self._scan_btn.config(state=tk.NORMAL)
+        self._scan_mode = ""
+        self._set_scan_buttons_state(tk.NORMAL)
         self._set_status("Нужен дуплекс")
         self._notify_warning("Сканирование", message)
 
     def _on_scan_batch_done(self, results: List[dict], skipped: int, total_sides: int) -> None:
         self._scanning = False
-        self._scan_btn.config(state=tk.NORMAL)
+        self._scan_mode = ""
+        self._set_scan_buttons_state(tk.NORMAL)
 
         if not results:
             self._set_status(f"Лист пропущен: {total_sides} сторон без бланка")
@@ -1220,7 +1261,8 @@ class ScanStationApp:
 
     def _on_scan_error(self, message: str) -> None:
         self._scanning = False
-        self._scan_btn.config(state=tk.NORMAL)
+        self._scan_mode = ""
+        self._set_scan_buttons_state(tk.NORMAL)
         self._set_status("Ошибка")
         self._notify_error("Ошибка сканирования", message)
 
@@ -1664,7 +1706,7 @@ class ScanStationApp:
         self._link_btn.config(state=tk.DISABLED)
         self._export_btn.config(state=tk.DISABLED)
         if self.scanner is not None:
-            self._scan_btn.config(state=tk.NORMAL)
+            self._set_scan_buttons_state(tk.NORMAL)
         self._set_status(status)
 
     def _refresh_all_thumbnails(self) -> None:

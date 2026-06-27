@@ -302,7 +302,6 @@ def resolve_operator_input(
     previous_result: Mapping[str, Any],
     review_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Оператор ввёл номер вручную — фиксируем как 100% trusted forced link."""
     aud_cfg = config.get("auditorium", {})
     auditorium_id = aud_cfg.get("id", "default")
     scan_data = build_scan_data(blanks)
@@ -328,7 +327,6 @@ def resolve_operator_input(
 
 
 def session_work_id(blanks: Sequence["ScannedBlank"]) -> Optional[str]:
-    """work_id берётся с любого бланка с корректно распознанным QR."""
     for blank in blanks:
         qr = blank.qr_info
         if qr and qr.valid and qr.work_id:
@@ -337,21 +335,18 @@ def session_work_id(blanks: Sequence["ScannedBlank"]) -> Optional[str]:
 
 
 def _decode_page_number(blank: "ScannedBlank") -> str:
-    """Извлекает номер страницы с blan2 (3 цифры)."""
     veroytn = extract_veroytn(blank)
     if veroytn is None:
         return ""
     field: Optional[List] = None
-    if isinstance(veroytn, list):
-        field = veroytn
-    elif isinstance(veroytn, dict):
+    if isinstance(veroytn, dict):
         for key in ("page", "list", "sheet", "number"):
             if isinstance(veroytn.get(key), list):
                 field = veroytn[key]
                 break
     if not field or len(field) != 3:
         return ""
-    digits = "0123456789"
+    digits = "0234567"
     chars: List[str] = []
     for pos in field:
         if not isinstance(pos, dict):
@@ -367,11 +362,6 @@ def export_filename_for_blank(
     renames: Mapping[str, str],
     used_names: set[str],
 ) -> Optional[str]:
-    """
-    Имя файла: НОМЕР_QR-РАСПОЗНАННЫЙ.расширение
-    blan1/titul → следующий бланк или титул (из links)
-    blan2 → номер страницы (3 цифры)
-    """
     qr_num = format_blank_number(resolve_blank_id(blank))
     if len(qr_num) != 13:
         return None
@@ -393,10 +383,17 @@ def export_filename_for_blank(
     else:
         return None
 
-    if base in used_names and type_code == "blan2":
-        base = f"{base}_oborot"
-    elif base in used_names:
-        base = f"{base}_{type_code}"
+    if base in used_names:
+        if type_code == "blan2":
+            suffix_template = f"{base}_oborot"
+        else:
+            suffix_template = f"{base}_{type_code}"
+        candidate = suffix_template
+        counter = 2
+        while candidate in used_names:
+            candidate = f"{suffix_template}_{counter}"
+            counter += 1
+        base = candidate
 
     used_names.add(base)
     return base
@@ -513,7 +510,6 @@ _FOREIGN_REASON_MARKERS = (
 
 
 def detect_diversion(result: Optional[Mapping[str, Any]]) -> tuple[bool, List[str]]:
-    """Обнаружена «диверсия» — чужой бланк / подмена номера."""
     if not result or not result.get("ok"):
         return False, []
 
@@ -539,7 +535,6 @@ def is_export_ready(
     blanks: Sequence["ScannedBlank"],
     config: Mapping[str, Any],
 ) -> bool:
-    """Все связи готовы — можно экспортировать ZIP."""
     if not result or not result.get("ok"):
         return False
     if detect_diversion(result)[0]:

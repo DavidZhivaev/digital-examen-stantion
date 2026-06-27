@@ -49,3 +49,6 @@ operator_links.json
 audit_log.json
 manual_history.json
 issued_blanks.json
+
+.DS_Store
+*.pdf

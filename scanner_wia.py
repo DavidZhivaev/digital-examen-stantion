@@ -8,12 +8,16 @@ import threading
 from dataclasses import dataclass
 from typing import List, Optional
 
-if sys.platform != "win32":
-    raise RuntimeError("Станция сканирования поддерживает только Windows.")
-
-import pythoncom
-import win32com.client
 from PIL import Image
+
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    import pythoncom
+    import win32com.client
+else:
+    pythoncom = None
+    win32com = None
 
 WIA_DEVICE_TYPE_SCANNER = 1
 
@@ -52,6 +56,8 @@ class DuplexNotSupportedError(RuntimeError):
     """Сканер не поддерживает двустороннее сканирование."""
 
 def _ensure_com() -> None:
+    if not IS_WINDOWS:
+        return
     if getattr(_thread_local, "initialized", False):
         return
     pythoncom.CoInitialize()
@@ -76,6 +82,9 @@ def _get_property(obj, prop_id: int, default=None):
 
 
 def scan_image_system_dialog():
+    if not IS_WINDOWS:
+        raise RuntimeError("WIA system dialog is only available on Windows.")
+
     import pythoncom
     import win32com.client
 
@@ -148,6 +157,8 @@ def _try_set(obj, value, prop_id: Optional[int] = None, name: Optional[str] = No
 
 def find_scanners() -> List[ScannerInfo]:
     """Возвращает список реально подключённых сканеров WIA."""
+    if not IS_WINDOWS:
+        return []
     _ensure_com()
     manager = win32com.client.Dispatch("WIA.DeviceManager")
     scanners: List[ScannerInfo] = []
@@ -178,6 +189,8 @@ def _get_scan_item(device):
 
 def get_scanner_capabilities(scanner: ScannerInfo) -> dict:
     """Возвращает возможности сканера: duplex, ADF, планшет."""
+    if not IS_WINDOWS:
+        return {"duplex": False, "feeder": False, "flatbed": False, "capacity_raw": 0}
     _ensure_com()
     device = scanner.connect()
     item = _get_scan_item(device)
@@ -306,6 +319,8 @@ def scan_sheet_sides(
     """
     Сканирует лист А4 в ч/б. При duplex=True получает лицо и оборот.
     """
+    if not IS_WINDOWS:
+        raise RuntimeError("WIA scanning is only available on Windows. Use SANE on Linux.")
     _ensure_com()
     device = scanner.connect()
     item = _get_scan_item(device)

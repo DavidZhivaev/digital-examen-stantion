@@ -14,31 +14,57 @@ import tkinter as tk
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-import pythoncom
-import win32com.client
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional
 
 from PIL import Image, ImageTk
 
+IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+
+if IS_WINDOWS:
+    import pythoncom
+    import win32com.client
+else:
+    pythoncom = None
+    win32com = None
+
 from blank_processor import process_scanned_blank
 from qr_parser import QrPayload
 from recognizer import RecognitionResult, Recognizer, evaluate_special_case
-from scanner_wia import (
-    DuplexNotSupportedError,
-    ScannerInfo,
-    find_scanners,
-    format_scanner_label,
-    get_scanner_capabilities,
-    scan_image_system_dialog,
-    scan_sheet_sides,
-)
-from scanner_twain import (
-    TwainDriver,
-    TwainError,
-    is_twain_available,
-    get_twain_driver,
-)
+
+if IS_WINDOWS:
+    from scanner_wia import (
+        DuplexNotSupportedError,
+        ScannerInfo,
+        find_scanners,
+        format_scanner_label,
+        get_scanner_capabilities,
+        scan_image_system_dialog,
+        scan_sheet_sides,
+    )
+    from scanner_twain import (
+        TwainDriver,
+        TwainError,
+        is_twain_available,
+        get_twain_driver,
+    )
+else:
+    from scanner_sane import (
+        DuplexNotSupportedError,
+        ScannerInfo,
+        find_scanners,
+        format_scanner_label,
+        get_scanner_capabilities,
+        scan_image_system_dialog,
+        scan_sheet_sides,
+        is_sane_available,
+    )
+    # Stubs for TWAIN (Windows-only)
+    TwainDriver = None
+    TwainError = Exception
+    def is_twain_available(): return False
+    def get_twain_driver(): return None
 from station_integration import (
     apply_links_to_blanks,
     can_link_blanks,

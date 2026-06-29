@@ -8,12 +8,17 @@ echo.
 set "OpenCV_DIR=C:\Libraries\opencv\build"
 set "DTWAIN_ROOT=C:\Libraries\dtwain"
 
+:: Get pybind11 cmake directory from pip installation
+echo [INFO] Finding pybind11...
+for /f "tokens=*" %%i in ('python -m pybind11 --cmakedir') do set "pybind11_DIR=%%i"
+echo [INFO] pybind11_DIR: %pybind11_DIR%
+
 :: Create build directory
 mkdir build 2>nul
 cd build
 
 echo [INFO] Configuring CMake...
-cmake -DBUILD_PYTHON_MODULE=ON -DOpenCV_DIR="%OpenCV_DIR%" -DDTWAIN_ROOT="%DTWAIN_ROOT%" ..
+cmake -DBUILD_PYTHON_MODULE=ON -DOpenCV_DIR="%OpenCV_DIR%" -DDTWAIN_ROOT="%DTWAIN_ROOT%" -Dpybind11_DIR="%pybind11_DIR%" ..
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] CMake configuration failed!
     cd ..

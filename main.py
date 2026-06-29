@@ -86,6 +86,9 @@ from station_integration import (
 )
 
 from scanner_hal_wrapper import HardwareScanner, HAL_AVAILABLE
+from scan_logger import get_logger, log_exception, get_log_file
+
+log = get_logger("main")
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -690,15 +693,19 @@ class ScanStationApp:
 
     
     def _on_scan_complete(self, images):
+        log.info(f"_on_scan_complete() called with {len(images) if images else 0} images")
         if not images:
+            log.warning("No images received, scan cancelled")
             self._set_status("Сканирование отменено")
             return
 
         batch_id = str(uuid.uuid4())
+        log.info(f"Processing batch {batch_id}")
 
         results = []
 
         for part_idx, raw_image in enumerate(images, start=1):
+            log.debug(f"Processing image {part_idx}/{len(images)}: {raw_image.size}")
 
             processed = process_scanned_blank(
                 raw_image,
@@ -707,6 +714,7 @@ class ScanStationApp:
             )
 
             if not processed.visible:
+                log.debug(f"Image {part_idx} not visible, skipping")
                 continue
 
             recognition = self.recognizer.recognize(
@@ -741,6 +749,7 @@ class ScanStationApp:
                     "recognition": recognition,
                 }
             )
+            log.debug(f"Image {part_idx} processed successfully")
 
         self._on_scan_batch_done(
             results,
@@ -1041,8 +1050,10 @@ class ScanStationApp:
             self._use_twain = twain_cfg.get("prefer_over_wia", True)
 
     def _scan_twain_worker(self) -> None:
+        log.info("_scan_twain_worker() START")
         try:
             if not self._twain_driver:
+                log.error("TWAIN driver not initialized!")
                 raise TwainError("TWAIN driver not initialized")
 
             settings = self.config.get("scan_settings", {})
@@ -1050,7 +1061,10 @@ class ScanStationApp:
             color_mode = settings.get("color_mode", "grayscale")
             duplex = bool(settings.get("duplex", True))
 
+            log.info(f"TWAIN scan: dpi={dpi}, color={color_mode}, duplex={duplex}")
+
             def on_progress(msg: str) -> None:
+                log.debug(f"TWAIN progress: {msg}")
                 self.root.after(0, lambda: self._set_status(msg))
 
             raw_images = self._twain_driver.scan(
@@ -1060,11 +1074,15 @@ class ScanStationApp:
                 on_progress=on_progress,
             )
 
+            log.info(f"_scan_twain_worker() got {len(raw_images)} images")
             self.root.after(0, lambda: self._on_scan_complete(raw_images))
 
         except TwainError as exc:
+            log.error(f"TwainError: {exc}")
             self.root.after(0, lambda: self._notify_error("TWAIN", str(exc)))
         except Exception as exc:
+            log.error(f"_scan_twain_worker() error: {exc}")
+            log_exception(log, exc, "_scan_twain_worker")
             self.root.after(0, lambda: self._notify_error("Сканирование", str(exc)))
         finally:
             self.root.after(0, self._finish_scan)
@@ -1135,9 +1153,11 @@ class ScanStationApp:
             self._set_status("Сканер не выбран")
 
     def _finish_scan(self):
+        log.info("_finish_scan() - resetting scan state")
         self._scanning = False
         self._scan_btn.config(state=tk.NORMAL)
         self._set_status("Готово")
+        log.info("Scan finished, ready for next scan")
             
     def _scan_system_worker(self):
         try:
@@ -1164,10 +1184,28 @@ class ScanStationApp:
             )
 
     def _on_scan_click(self) -> None:
+        log.info("=" * 50)
+        log.info("_on_scan_click() triggered")
+        log.info(f"  _scanning: {self._scanning}")
+        log.info(f"  _use_hal: {getattr(self, '_use_hal', False)}")
+        log.info(f"  _use_twain: {getattr(self, '_use_twain', False)}")
+        log.info(f"  scanner: {self.scanner}")
+
         if self._scanning:
+            log.warning("Already scanning, ignoring click")
+            return
+
+        # Check HAL first (continuous ADF support)
+        if getattr(self, '_use_hal', False) and self._hw_scanner:
+            log.info("Using HAL scanner path")
+            self._scanning = True
+            self._scan_btn.config(state=tk.DISABLED)
+            self._set_status("HAL: запуск сканирования...")
+            threading.Thread(target=self._scan_hal_worker, daemon=True).start()
             return
 
         if self._use_twain and self._twain_driver and self._twain_driver.available:
+            log.info("Using TWAIN driver path")
             self._scanning = True
             self._scan_btn.config(state=tk.DISABLED)
             self._set_status("TWAIN: запуск сканирования...")
@@ -1175,11 +1213,14 @@ class ScanStationApp:
             return
 
         if self.scanner is None:
+            log.warning("No scanner selected!")
             return
 
         caps = self._scanner_caps or get_scanner_capabilities(self.scanner)
+        log.info(f"Using WIA path, caps: {caps}")
 
         if not caps.get("duplex"):
+            log.info("No duplex, using system dialog")
             self._scanning = True
             self._scan_btn.config(state=tk.DISABLED)
             self._set_status("Ожидание сканирования...")
@@ -1190,12 +1231,14 @@ class ScanStationApp:
             ).start()
             return
 
+        log.info("Using WIA duplex scan")
         self._scanning = True
         self._scan_btn.config(state=tk.DISABLED)
         self._set_status("Сканирование...")
         threading.Thread(target=self._scan_worker, daemon=True).start()
 
     def _scan_worker(self) -> None:
+        log.info("_scan_worker() START (WIA path)")
         try:
             settings = self.config.get("scan_settings", {})
             dpi = int(settings.get("dpi", 300))
@@ -1204,6 +1247,9 @@ class ScanStationApp:
             max_sides = int(settings.get("max_sides_per_sheet", 2))
             page_size = str(settings.get("page_size", "a4"))
             auto_border = bool(settings.get("auto_border", True))
+
+            log.info(f"Scan settings: dpi={dpi}, color={color_mode}, duplex={duplex}")
+            log.info(f"  max_sides={max_sides}, page_size={page_size}, auto_border={auto_border}")
 
             raw_images = scan_sheet_sides(
                 self.scanner,
@@ -1216,13 +1262,17 @@ class ScanStationApp:
                 require_duplex=True,
             )
 
+            log.info(f"scan_sheet_sides returned {len(raw_images)} images")
+
             side_labels = ["Лицевая", "Оборот"]
             results: List[dict] = []
             skipped = 0
 
             for part_idx, raw_image in enumerate(raw_images, start=1):
+                log.debug(f"Processing image {part_idx}: {raw_image.size}")
                 processed = process_scanned_blank(raw_image, self.config, sheet_part=part_idx)
                 if not processed.visible or processed.image is None:
+                    log.debug(f"Image {part_idx} skipped (not visible or no image)")
                     skipped += 1
                     continue
 
@@ -1248,13 +1298,17 @@ class ScanStationApp:
                     "recognition": recognition,
                 })
 
+            log.info(f"_scan_worker() done: {len(results)} results, {skipped} skipped")
             self.root.after(
                 0,
                 lambda r=results, s=skipped, total=len(raw_images): self._on_scan_batch_done(r, s, total),
             )
         except DuplexNotSupportedError as exc:
+            log.error(f"DuplexNotSupportedError: {exc}")
             self.root.after(0, lambda e=str(exc): self._on_scan_duplex_error(e))
         except Exception as exc:
+            log.error(f"_scan_worker() error: {exc}")
+            log_exception(log, exc, "_scan_worker")
             self.root.after(0, lambda e=str(exc): self._on_scan_error(e))
 
     def _on_scan_duplex_error(self, message: str) -> None:
@@ -1799,28 +1853,49 @@ class ScanStationApp:
                     sticky=tk.N,
                 )
     def _init_scanners(self) -> None:
+        log.info("=" * 50)
+        log.info("_init_scanners() - Initializing scanner subsystem")
+        log.info(f"  HAL_AVAILABLE: {HAL_AVAILABLE}")
+
         if HAL_AVAILABLE:
+            log.info("Attempting HAL scanner initialization...")
             try:
                 self._hw_scanner = HardwareScanner()
                 self._use_hal = True
+                log.info("SUCCESS: Using HAL scanner (continuous ADF support)")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"HAL init failed: {e}")
+                log_exception(log, e, "HAL init")
+
         twain_cfg = self.config.get("twain", {})
+        log.info(f"TWAIN config: {twain_cfg}")
         if twain_cfg.get("enabled", True):
+            log.info("Attempting TWAIN driver initialization...")
             self._twain_driver = get_twain_driver()
             if self._twain_driver and self._twain_driver.available:
                 self._use_twain = True
+                log.info("SUCCESS: Using TWAIN driver")
                 return
+            else:
+                log.warning("TWAIN driver not available")
+
+        log.warning("No HAL or TWAIN available - will use WIA fallback")
+        log.info("=" * 50)
+
     def _scan_hal_worker(self) -> None:
+        log.info("_scan_hal_worker() START")
         try:
             images = self._hw_scanner.scan_batch(
                 on_page=lambda img, idx: self.root.after(
                     0, self._update_progress, f"Page {idx + 1}"
                 )
             )
+            log.info(f"_scan_hal_worker() got {len(images)} images")
             self.root.after(0, self._on_scan_complete, images)
         except Exception as e:
+            log.error(f"_scan_hal_worker() error: {e}")
+            log_exception(log, e, "_scan_hal_worker")
             self.root.after(0, self._on_scan_error, str(e))
 
     def _zoom_in(self) -> None:
@@ -1852,6 +1927,15 @@ def main() -> None:
     if sys.platform != "win32":
         print("Станция сканирования работает только на Windows 10/11.")
         sys.exit(1)
+
+    # Print log file location for debugging
+    print(f"[DEBUG] Log file: {get_log_file()}")
+    log.info("=" * 60)
+    log.info("APPLICATION STARTING")
+    log.info(f"Python: {sys.version}")
+    log.info(f"Platform: {sys.platform}")
+    log.info(f"HAL_AVAILABLE: {HAL_AVAILABLE}")
+    log.info("=" * 60)
     app = ScanStationApp()
     app.run()
 

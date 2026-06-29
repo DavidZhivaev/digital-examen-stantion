@@ -10,6 +10,10 @@ from typing import List, Optional
 
 from PIL import Image
 
+from scan_logger import get_logger, log_exception
+
+log = get_logger("wia")
+
 IS_WINDOWS = sys.platform == "win32"
 
 if IS_WINDOWS:
@@ -157,18 +161,26 @@ def _try_set(obj, value, prop_id: Optional[int] = None, name: Optional[str] = No
 
 def find_scanners() -> List[ScannerInfo]:
     """Возвращает список реально подключённых сканеров WIA."""
+    log.info("find_scanners() called")
     if not IS_WINDOWS:
+        log.warning("Not Windows, returning empty list")
         return []
     _ensure_com()
+    log.debug("COM initialized, creating DeviceManager")
     manager = win32com.client.Dispatch("WIA.DeviceManager")
     scanners: List[ScannerInfo] = []
-    for i in range(1, manager.DeviceInfos.Count + 1):
+    device_count = manager.DeviceInfos.Count
+    log.debug(f"Found {device_count} WIA devices")
+    for i in range(1, device_count + 1):
         info = manager.DeviceInfos.Item(i)
+        log.debug(f"Device {i}: Type={info.Type}")
         if info.Type != WIA_DEVICE_TYPE_SCANNER:
             continue
         name = _get_named_property(info, "Name") or _get_property(info, "Name", f"Сканер {i}")
         device_id = _get_named_property(info, "Device ID") or _get_property(info, "DeviceID", str(i))
+        log.info(f"Found scanner: {name} (ID: {device_id})")
         scanners.append(ScannerInfo(device_id=device_id, name=str(name), _device_info=info))
+    log.info(f"Total scanners found: {len(scanners)}")
     return scanners
 
 
@@ -189,24 +201,33 @@ def _get_scan_item(device):
 
 def get_scanner_capabilities(scanner: ScannerInfo) -> dict:
     """Возвращает возможности сканера: duplex, ADF, планшет."""
+    log.info(f"get_scanner_capabilities() for {scanner.name}")
     if not IS_WINDOWS:
+        log.warning("Not Windows, returning empty capabilities")
         return {"duplex": False, "feeder": False, "flatbed": False, "capacity_raw": 0}
     _ensure_com()
+    log.debug("Connecting to device...")
     device = scanner.connect()
+    log.debug("Getting scan item...")
     item = _get_scan_item(device)
 
     capacity = _get_property(item, WIA_DPS_DOCUMENT_HANDLING_CAPACITY, 0) or 0
+    log.debug(f"Capacity from item: {capacity}")
     if not capacity:
         capacity = _get_property(device, WIA_DPS_DOCUMENT_HANDLING_CAPACITY, 0) or 0
+        log.debug(f"Capacity from device: {capacity}")
     if not capacity:
         capacity = int(_get_named_property(item, "Document Handling Capabilities", 0) or 0)
+        log.debug(f"Capacity from named property: {capacity}")
 
-    return {
+    caps = {
         "duplex": bool(capacity & WIA_DUPLEX),
         "feeder": bool(capacity & WIA_FEEDER),
         "flatbed": bool(capacity & WIA_FLATBED),
         "capacity_raw": int(capacity),
     }
+    log.info(f"Scanner capabilities: duplex={caps['duplex']}, feeder={caps['feeder']}, flatbed={caps['flatbed']}, raw={capacity}")
+    return caps
 
 
 def format_scanner_label(scanner: ScannerInfo) -> str:
@@ -222,46 +243,75 @@ def format_scanner_label(scanner: ScannerInfo) -> str:
 
 
 def _transfer_to_image(result) -> Image.Image:
+    log.debug(f"_transfer_to_image(result={type(result)})")
+
     if result is None:
+        log.error("Transfer result is None!")
         raise RuntimeError("Сканирование не вернуло изображение.")
 
-    if not getattr(result, "FileData", None):
+    file_data = getattr(result, "FileData", None)
+    log.debug(f"FileData present: {file_data is not None}")
+
+    if not file_data:
+        log.error("Transfer result has no FileData!")
         raise RuntimeError("Сканирование вернуло пустые данные.")
 
-    raw = bytes(result.FileData)
+    raw = bytes(file_data)
+    log.debug(f"Raw data size: {len(raw)} bytes")
+
     image = Image.open(io.BytesIO(raw))
     image.load()
-    return image.convert("RGB")
+    log.debug(f"Image loaded: size={image.size}, mode={image.mode}")
+
+    rgb_image = image.convert("RGB")
+    log.debug(f"Converted to RGB: size={rgb_image.size}")
+    return rgb_image
 
 
 def _configure_document_handling(item, duplex: bool) -> bool:
+    log.debug(f"_configure_document_handling(duplex={duplex})")
+
     if not duplex:
         capacity = _get_property(item, WIA_DPS_DOCUMENT_HANDLING_CAPACITY, 0) or 0
+        log.debug(f"Non-duplex mode, capacity={capacity}")
         if capacity & WIA_FLATBED:
             select = WIA_FLATBED
+            log.debug("Using FLATBED")
         elif capacity & WIA_FEEDER:
             select = WIA_FEEDER
+            log.debug("Using FEEDER")
         else:
+            log.debug("No specific handling, returning True")
             return True
-        return _try_set(item, select, prop_id=WIA_DPS_DOCUMENT_HANDLING_SELECT, name="Document Handling Select")
+        result = _try_set(item, select, prop_id=WIA_DPS_DOCUMENT_HANDLING_SELECT, name="Document Handling Select")
+        log.debug(f"Set document handling select: {result}")
+        return result
 
     capacity = _get_property(item, WIA_DPS_DOCUMENT_HANDLING_CAPACITY, 0) or 0
+    log.debug(f"Duplex mode, initial capacity={capacity}")
     if not capacity:
         capacity = int(_get_named_property(item, "Document Handling Capabilities", 0) or 0)
+        log.debug(f"Capacity from named property={capacity}")
     if not (capacity & WIA_DUPLEX):
+        log.warning("Duplex not supported in capacity flags")
         return False
 
     if capacity & WIA_FEEDER:
         select = WIA_FEEDER | WIA_DUPLEX
+        log.debug(f"Using FEEDER + DUPLEX (select={select})")
     elif capacity & WIA_FLATBED:
         select = WIA_FLATBED | WIA_DUPLEX
+        log.debug(f"Using FLATBED + DUPLEX (select={select})")
     else:
         select = WIA_DUPLEX
+        log.debug(f"Using DUPLEX only (select={select})")
 
     if not _try_set(item, select, prop_id=WIA_DPS_DOCUMENT_HANDLING_SELECT, name="Document Handling Select"):
+        log.warning("Failed to set document handling select")
         return False
 
-    _try_set(item, 2, prop_id=WIA_IPS_PAGES, name="Pages")
+    pages_result = _try_set(item, 2, prop_id=WIA_IPS_PAGES, name="Pages")
+    log.debug(f"Set Pages to 2: {pages_result}")
     return True
 
 
@@ -274,19 +324,28 @@ def _configure_scan_item(
     page_size: str = "a4",
     auto_border: bool = True,
 ) -> bool:
+    log.debug(f"_configure_scan_item(dpi={dpi}, color_mode={color_mode}, duplex={duplex})")
     intent = COLOR_MODE_MAP.get(color_mode.lower(), WIA_INTENT_IMAGE_TYPE_GRAYSCALE)
+    log.debug(f"Color intent: {intent}")
 
-    _try_set(item, intent, prop_id=WIA_IPS_CUR_INTENT, name="Current Intent")
-    _try_set(item, dpi, prop_id=WIA_IPS_XRES, name="Horizontal Resolution")
-    _try_set(item, dpi, prop_id=WIA_IPS_YRES, name="Vertical Resolution")
-    _try_set(item, WIA_ORIENTATION_PORTRAIT, prop_id=WIA_IPS_ORIENTATION, name="Orientation")
+    r1 = _try_set(item, intent, prop_id=WIA_IPS_CUR_INTENT, name="Current Intent")
+    log.debug(f"Set Current Intent: {r1}")
+    r2 = _try_set(item, dpi, prop_id=WIA_IPS_XRES, name="Horizontal Resolution")
+    log.debug(f"Set Horizontal Resolution ({dpi}): {r2}")
+    r3 = _try_set(item, dpi, prop_id=WIA_IPS_YRES, name="Vertical Resolution")
+    log.debug(f"Set Vertical Resolution ({dpi}): {r3}")
+    r4 = _try_set(item, WIA_ORIENTATION_PORTRAIT, prop_id=WIA_IPS_ORIENTATION, name="Orientation")
+    log.debug(f"Set Orientation: {r4}")
 
     if page_size.lower() == "a4":
-        _try_set(item, WIA_PAGE_A4, prop_id=WIA_IPS_PAGE_SIZE, name="Page Size")
+        r5 = _try_set(item, WIA_PAGE_A4, prop_id=WIA_IPS_PAGE_SIZE, name="Page Size")
+        log.debug(f"Set Page Size (A4): {r5}")
 
     if auto_border:
-        _try_set(item, 1, name="Auto-Crop")
-        _try_set(item, 1, name="Auto Deskew")
+        r6 = _try_set(item, 1, name="Auto-Crop")
+        log.debug(f"Set Auto-Crop: {r6}")
+        r7 = _try_set(item, 1, name="Auto Deskew")
+        log.debug(f"Set Auto Deskew: {r7}")
 
     return _configure_document_handling(item, duplex=duplex)
 
@@ -319,18 +378,38 @@ def scan_sheet_sides(
     """
     Сканирует лист А4 в ч/б. При duplex=True получает лицо и оборот.
     """
-    if not IS_WINDOWS:
-        raise RuntimeError("WIA scanning is only available on Windows. Use SANE on Linux.")
-    _ensure_com()
-    device = scanner.connect()
-    item = _get_scan_item(device)
+    log.info("=" * 50)
+    log.info("scan_sheet_sides() START")
+    log.info(f"  scanner: {scanner.name}")
+    log.info(f"  dpi: {dpi}, color_mode: {color_mode}")
+    log.info(f"  duplex: {duplex}, max_sides: {max_sides}")
+    log.info(f"  page_size: {page_size}, auto_border: {auto_border}")
+    log.info(f"  require_duplex: {require_duplex}")
 
+    if not IS_WINDOWS:
+        log.error("Not Windows platform!")
+        raise RuntimeError("WIA scanning is only available on Windows. Use SANE on Linux.")
+
+    log.debug("Ensuring COM...")
+    _ensure_com()
+
+    log.debug("Connecting to scanner device...")
+    device = scanner.connect()
+    log.debug(f"Device connected: {device}")
+
+    log.debug("Getting scan item...")
+    item = _get_scan_item(device)
+    log.debug(f"Scan item obtained: {item}")
+
+    log.debug("Getting scanner capabilities...")
     caps = get_scanner_capabilities(scanner)
     if duplex and require_duplex and not caps.get("duplex"):
+        log.error("Duplex required but not supported!")
         raise DuplexNotSupportedError(
             "Двустороннее сканирование доступно только на сканерах с поддержкой дуплекса."
         )
 
+    log.debug("Configuring scan item...")
     duplex_enabled = _configure_scan_item(
         item,
         dpi=dpi,
@@ -339,8 +418,10 @@ def scan_sheet_sides(
         page_size=page_size,
         auto_border=auto_border,
     )
+    log.debug(f"Duplex enabled result: {duplex_enabled}")
 
     if duplex and not duplex_enabled:
+        log.error("Failed to enable duplex mode!")
         raise DuplexNotSupportedError(
             "Не удалось включить двусторонний режим на выбранном сканере."
         )
@@ -348,19 +429,36 @@ def scan_sheet_sides(
     images: List[Image.Image] = []
     errors: List[str] = []
     sides_to_scan = max(1, max_sides) if duplex else 1
+    log.info(f"Will scan {sides_to_scan} side(s)")
 
     for side in range(sides_to_scan):
+        log.info(f"--- Scanning side {side + 1}/{sides_to_scan} ---")
         try:
+            log.debug("Calling item.Transfer()...")
             result = item.Transfer()
-            images.append(_transfer_to_image(result))
+            log.debug(f"Transfer result type: {type(result)}")
+            log.debug(f"Transfer result: {result}")
+
+            log.debug("Converting to image...")
+            img = _transfer_to_image(result)
+            log.info(f"Side {side + 1} scanned successfully: {img.size}, mode={img.mode}")
+            images.append(img)
+
         except Exception as exc:
             err = str(exc)
+            log.error(f"Side {side + 1} scan error: {err}")
+            log_exception(log, exc, f"Side {side + 1} scan")
             errors.append(err)
             if side == 0:
+                log.error("First side failed, raising exception")
                 raise RuntimeError(f"Ошибка сканирования: {err}") from exc
+            log.warning("Non-first side failed, breaking loop")
             break
 
     if not images and errors:
+        log.error(f"No images and errors: {errors}")
         raise RuntimeError(errors[0])
 
+    log.info(f"scan_sheet_sides() COMPLETE: {len(images)} images, {len(errors)} errors")
+    log.info("=" * 50)
     return images

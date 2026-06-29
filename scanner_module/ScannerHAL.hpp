@@ -265,21 +265,46 @@ class alignas(64) LinuxSaneScanner final {
 private:
 	SaneHandle m_handle{};
 
-	bool SetSaneOption(const char* optionName, const void* value) {
+	bool SetSaneOptionBool(const char* optionName, SANE_Bool value) {
 		if (!m_handle.IsValid()) return false;
 
-		const SANE_Option_Descriptor* desc{nullptr};
 		SANE_Int numOptions{0};
 		sane_control_option(m_handle.Get(), 0, SANE_ACTION_GET_VALUE, &numOptions, nullptr);
 
 		for (SANE_Int i = 1; i < numOptions; ++i) {
-			desc = sane_get_option_descriptor(m_handle.Get(), i);
+			const SANE_Option_Descriptor* desc = sane_get_option_descriptor(m_handle.Get(), i);
 			if (desc && desc->name && std::strcmp(desc->name, optionName) == 0) {
-				SANE_Int info{0};
-				if (sane_control_option(m_handle.Get(), i, SANE_ACTION_SET_VALUE,
-					const_cast<void*>(value), &info) == SANE_STATUS_GOOD) {
-					std::cout << "[SANE] Set " << optionName << " successfully\n";
-					return true;
+				if (desc->type == SANE_TYPE_BOOL) {
+					SANE_Int info{0};
+					if (sane_control_option(m_handle.Get(), i, SANE_ACTION_SET_VALUE,
+						&value, &info) == SANE_STATUS_GOOD) {
+						std::cout << "[SANE] Set " << optionName << " = true\n";
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	bool SetSaneOptionString(const char* optionName, const char* value) {
+		if (!m_handle.IsValid()) return false;
+
+		SANE_Int numOptions{0};
+		sane_control_option(m_handle.Get(), 0, SANE_ACTION_GET_VALUE, &numOptions, nullptr);
+
+		for (SANE_Int i = 1; i < numOptions; ++i) {
+			const SANE_Option_Descriptor* desc = sane_get_option_descriptor(m_handle.Get(), i);
+			if (desc && desc->name && std::strcmp(desc->name, optionName) == 0) {
+				if (desc->type == SANE_TYPE_STRING) {
+					char buffer[256]{};
+					std::strncpy(buffer, value, sizeof(buffer) - 1);
+					SANE_Int info{0};
+					if (sane_control_option(m_handle.Get(), i, SANE_ACTION_SET_VALUE,
+						buffer, &info) == SANE_STATUS_GOOD) {
+						std::cout << "[SANE] Set " << optionName << " = " << value << "\n";
+						return true;
+					}
 				}
 			}
 		}
@@ -288,11 +313,11 @@ private:
 
 	void EnableDuplex() {
 		// Try common duplex option names used by different SANE backends
-		SANE_Bool duplexOn = SANE_TRUE;
-		if (SetSaneOption("duplex", &duplexOn)) return;
-		if (SetSaneOption("adf-mode", "Duplex")) return;
-		if (SetSaneOption("source", "ADF Duplex")) return;
-		if (SetSaneOption("scan-source", "ADF Duplex")) return;
+		if (SetSaneOptionBool("duplex", SANE_TRUE)) return;
+		if (SetSaneOptionString("adf-mode", "Duplex")) return;
+		if (SetSaneOptionString("source", "ADF Duplex")) return;
+		if (SetSaneOptionString("source", "Duplex")) return;
+		if (SetSaneOptionString("scan-source", "ADF Duplex")) return;
 		std::cout << "[SANE] Duplex option not found or not supported\n";
 	}
 

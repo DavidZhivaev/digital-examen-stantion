@@ -1940,9 +1940,6 @@ class ScanStationApp:
 
 
 def main() -> None:
-    if sys.platform != "win32":
-        print("Станция сканирования работает только на Windows 10/11.")
-        sys.exit(1)
 
     # Print log file location for debugging
     print(f"[DEBUG] Log file: {get_log_file()}")

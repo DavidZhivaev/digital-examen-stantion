@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 import cv2
@@ -28,8 +29,16 @@ from digit_inference import (
 from field_regions import FIELD_LAYOUT, cell_to_pixels
 from recognizer import BLANK_ALPHABET, PAGE_ALPHABET, Recognizer, _is_empty_cell
 
-BASE_DIR = Path(__file__).parent
-WEIGHTS_PATH = BASE_DIR / "digit_model.pth"
+
+def _get_resource_path(relative_path: str) -> Path:
+    """Get path to resource, works for dev and PyInstaller bundle."""
+    if hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent / relative_path
+
+
+BASE_DIR = _get_resource_path(".")
+WEIGHTS_PATH = _get_resource_path("digit_model.pth")
 
 FIELD_LABELS = {
     "next": ("next_blank", BLANK_ALPHABET),

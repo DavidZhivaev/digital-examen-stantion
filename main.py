@@ -87,9 +87,18 @@ from station_integration import (
 
 from scanner_hal_wrapper import HardwareScanner, HAL_AVAILABLE
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+
+def get_resource_path(relative_path: str) -> Path:
+    """Get path to resource, works for dev and PyInstaller bundle."""
+    if hasattr(sys, '_MEIPASS'):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent / relative_path
+
+
+BASE_DIR = get_resource_path(".")
+CONFIG_PATH = get_resource_path("config.json")
 APP_TITLE = "ГБОУ Школа 1580"
-BASE_DIR = Path(__file__).parent
 
 
 def load_config() -> dict:
@@ -638,7 +647,9 @@ class ScanStationApp:
 
         self.root = tk.Tk()
         
-        self.root.iconbitmap("scan.ico")
+        icon_path = get_resource_path("scan.ico")
+        if icon_path.exists():
+            self.root.iconbitmap(str(icon_path))
         self.root.title(self.title)
         self.root.minsize(1100, 640)
         self.root.configure(bg=self.ui_cfg.get("background", "#f0f2f5"))

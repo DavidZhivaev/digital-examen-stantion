@@ -22,8 +22,16 @@ from digit_inference import (
 )
 from field_regions import FIELD_LAYOUT, cell_to_pixels
 
-BASE_DIR = Path(__file__).parent
-WEIGHTS_PATH = BASE_DIR / "digit_model.pth"
+
+def _get_resource_path(relative_path: str) -> Path:
+    """Get path to resource, works for dev and PyInstaller bundle."""
+    if hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent / relative_path
+
+
+BASE_DIR = _get_resource_path(".")
+WEIGHTS_PATH = _get_resource_path("digit_model.pth")
 
 BLANK_ALPHABET = "0234567"
 # Модель обучена только на TARGET_CLASSES = [0, 2, 3, 4, 5, 6, 7].

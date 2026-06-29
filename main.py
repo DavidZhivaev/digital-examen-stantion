@@ -1893,6 +1893,12 @@ class ScanStationApp:
     def _scan_hal_worker(self) -> None:
         log.info("_scan_hal_worker() START")
         try:
+            if self.scanner:
+                device_id = self.scanner.device_id
+                log.info(f"Connecting to scanner: {device_id}")
+                if not self._hw_scanner.connect(device_id):
+                    raise RuntimeError(f"Failed to connect to scanner: {device_id}")
+
             images = self._hw_scanner.scan_batch(
                 on_page=lambda img, idx: self.root.after(
                     0, self._update_progress, f"Page {idx + 1}"
@@ -1904,6 +1910,9 @@ class ScanStationApp:
             log.error(f"_scan_hal_worker() error: {e}")
             log_exception(log, e, "_scan_hal_worker")
             self.root.after(0, self._on_scan_error, str(e))
+        finally:
+            self._hw_scanner.disconnect()
+            self.root.after(0, self._finish_scan)
 
     def _zoom_in(self) -> None:
         step = float(self.display_cfg.get("zoom_step", 0.1))

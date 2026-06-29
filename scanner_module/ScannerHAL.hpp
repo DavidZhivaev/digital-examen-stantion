@@ -383,8 +383,8 @@ public:
 #endif
 	};
 
-	explicit constexpr HardwareScanner(ScannerAPI api = ScannerAPI::TWAIN) noexcept {
 #if defined(_WIN32) || defined(_WIN64)
+	explicit constexpr HardwareScanner(ScannerAPI api = ScannerAPI::TWAIN) noexcept {
 		switch (api) {
 			case ScannerAPI::TWAIN:
 				m_scanner = WindowsTWAINScanner{};
@@ -393,7 +393,9 @@ public:
 				m_scanner = WindowsTWAINScanner{};
 				break;
 		}
+	}
 #elif defined(__linux__)
+	explicit constexpr HardwareScanner(ScannerAPI api = ScannerAPI::SANE) noexcept {
 		switch (api) {
 			case ScannerAPI::SANE:
 				m_scanner = LinuxSaneScanner{};
@@ -402,8 +404,8 @@ public:
 				m_scanner = LinuxSaneScanner{};
 				break;
 		}
-#endif
 	}
+#endif
 
 	HardwareScanner(const HardwareScanner&) = delete;
 	HardwareScanner& operator=(const HardwareScanner&) = delete;

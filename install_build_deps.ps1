@@ -103,8 +103,26 @@ if ($SkipOpenCV) {
     $opencvUrl = "https://github.com/opencv/opencv/releases/download/4.8.0/opencv-4.8.0-windows.exe"
     $opencvInstaller = "$tempDir\opencv-4.8.0-windows.exe"
 
+    # Fix TLS issues for older PowerShell
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
     if (-not (Test-Path $opencvInstaller)) {
-        Invoke-WebRequest -Uri $opencvUrl -OutFile $opencvInstaller -UseBasicParsing
+        try {
+            $curlExists = Get-Command curl.exe -ErrorAction SilentlyContinue
+            if ($curlExists) {
+                Write-Host "  Using curl..." -ForegroundColor Gray
+                curl.exe -L -o $opencvInstaller $opencvUrl
+            } else {
+                Write-Host "  Using WebClient..." -ForegroundColor Gray
+                $webClient = New-Object System.Net.WebClient
+                $webClient.DownloadFile($opencvUrl, $opencvInstaller)
+            }
+        } catch {
+            Write-Host "  [ERROR] Download failed: $_" -ForegroundColor Red
+            Write-Host "  Please download manually from: $opencvUrl" -ForegroundColor Yellow
+            pause
+            exit 1
+        }
     }
 
     Write-Host "  Extracting OpenCV to C:\Libraries\opencv..." -ForegroundColor Yellow
@@ -149,7 +167,33 @@ if ($SkipDTWAIN) {
 
     if (-not (Test-Path $dtwainZip)) {
         Write-Host "  Downloading from GitHub..." -ForegroundColor Yellow
-        Invoke-WebRequest -Uri $dtwainUrl -OutFile $dtwainZip -UseBasicParsing
+
+        # Fix TLS issues for older PowerShell
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+        try {
+            # Try curl first (built into Windows 10+)
+            $curlExists = Get-Command curl.exe -ErrorAction SilentlyContinue
+            if ($curlExists) {
+                Write-Host "  Using curl..." -ForegroundColor Gray
+                curl.exe -L -o $dtwainZip $dtwainUrl
+            } else {
+                # Fallback to .NET WebClient
+                Write-Host "  Using WebClient..." -ForegroundColor Gray
+                $webClient = New-Object System.Net.WebClient
+                $webClient.DownloadFile($dtwainUrl, $dtwainZip)
+            }
+        } catch {
+            Write-Host "  [ERROR] Download failed: $_" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  Please download manually:" -ForegroundColor Yellow
+            Write-Host "  URL: $dtwainUrl" -ForegroundColor White
+            Write-Host "  Save to: $dtwainZip" -ForegroundColor White
+            Write-Host ""
+            Write-Host "  Or download and extract to: C:\Libraries\dtwain" -ForegroundColor White
+            pause
+            exit 1
+        }
     }
 
     Write-Host "  Extracting DTWAIN to $dtwainDir..." -ForegroundColor Yellow

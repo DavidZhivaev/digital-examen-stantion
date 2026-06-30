@@ -6,15 +6,16 @@
 #include "../core/static_vector.hpp"
 #include "../core/file_handle.hpp"
 #include <array>
+#include <vector>
 
 namespace output_module::generators {
 
 using namespace core;
 using namespace zip;
 
-inline constexpr SizeType ZIP_BUFFER_SIZE{1ULL << 24};
+inline constexpr SizeType ZIP_BUFFER_SIZE{1ULL << 21};  // 2MB
 inline constexpr SizeType MAX_ZIP_ENTRIES{16};
-inline constexpr SizeType MAX_FILE_READ_SIZE{1ULL << 23};
+inline constexpr SizeType MAX_FILE_READ_SIZE{1ULL << 21};  // 2MB
 
 struct ZipEntryInfo {
     StaticString<256> fileName{};
@@ -93,7 +94,7 @@ public:
             return false;
         }
 
-        std::array<ByteType, MAX_FILE_READ_SIZE> fileBuffer{};
+        std::vector<ByteType> fileBuffer(fileSize);
         auto bytesRead{file.read(fileBuffer.data(), fileSize)};
         if (bytesRead <= 0) [[unlikely]] {
             return false;

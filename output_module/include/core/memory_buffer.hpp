@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <array>
+#include <vector>
 #include <cstring>
 
 namespace output_module::core {
@@ -144,11 +145,17 @@ public:
     using SizeType = core::SizeType;
 
 private:
-    std::array<ValueType, Capacity> data_{};
+    std::vector<ValueType> data_;
     SizeType size_{0};
 
+    void ensureCapacity() {
+        if (data_.size() < Capacity) {
+            data_.resize(Capacity);
+        }
+    }
+
 public:
-    constexpr LinearBuffer() noexcept = default;
+    LinearBuffer() : data_(Capacity) {}
 
     [[nodiscard]] constexpr auto capacity() const noexcept -> SizeType {
         return Capacity;
@@ -166,19 +173,19 @@ public:
         return size_ == 0;
     }
 
-    [[nodiscard]] constexpr auto data() noexcept -> ValueType* {
+    [[nodiscard]] auto data() noexcept -> ValueType* {
         return data_.data();
     }
 
-    [[nodiscard]] constexpr auto data() const noexcept -> const ValueType* {
+    [[nodiscard]] auto data() const noexcept -> const ValueType* {
         return data_.data();
     }
 
-    constexpr auto clear() noexcept -> void {
+    auto clear() noexcept -> void {
         size_ = 0;
     }
 
-    constexpr auto append(ValueType byte) noexcept -> bool {
+    auto append(ValueType byte) noexcept -> bool {
         if (size_ < Capacity) [[likely]] {
             data_[size_++] = byte;
             return true;
@@ -186,7 +193,7 @@ public:
         return false;
     }
 
-    constexpr auto append(const void* src, SizeType len) noexcept -> SizeType {
+    auto append(const void* src, SizeType len) noexcept -> SizeType {
         SizeType toWrite{len};
         if (size_ + toWrite > Capacity) {
             toWrite = Capacity - size_;
@@ -198,7 +205,7 @@ public:
         return toWrite;
     }
 
-    constexpr auto append(const char* str) noexcept -> SizeType {
+    auto append(const char* str) noexcept -> SizeType {
         SizeType written{0};
         while (str[written] != '\0' && size_ < Capacity) {
             data_[size_++] = static_cast<ValueType>(str[written++]);
@@ -207,7 +214,7 @@ public:
     }
 
     template<SizeType N>
-    constexpr auto append(const StaticString<N>& str) noexcept -> SizeType {
+    auto append(const StaticString<N>& str) noexcept -> SizeType {
         return append(str.data(), str.size());
     }
 };

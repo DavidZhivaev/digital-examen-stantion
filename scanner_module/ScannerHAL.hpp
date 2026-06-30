@@ -271,35 +271,31 @@ private:
 		SANE_Int numOptions{0};
 		sane_control_option(m_handle.Get(), 0, SANE_ACTION_GET_VALUE, &numOptions, nullptr);
 
-		std::cout << "[SANE] ===== Available scanner options =====\n";
+		std::cout << "[SANE] Available scanner options:\n";
 		for (SANE_Int i = 1; i < numOptions; ++i) {
 			const SANE_Option_Descriptor* desc = sane_get_option_descriptor(m_handle.Get(), i);
 			if (!desc || !desc->name) continue;
 
 			const char* typeStr = "unknown";
-			switch (desc->type) {
-				case SANE_TYPE_BOOL: typeStr = "BOOL"; break;
-				case SANE_TYPE_INT: typeStr = "INT"; break;
-				case SANE_TYPE_FIXED: typeStr = "FIXED"; break;
-				case SANE_TYPE_STRING: typeStr = "STRING"; break;
-				case SANE_TYPE_BUTTON: typeStr = "BUTTON"; break;
-				case SANE_TYPE_GROUP: typeStr = "GROUP"; break;
-			}
+			if (desc->type == SANE_TYPE_BOOL) typeStr = "BOOL";
+			else if (desc->type == SANE_TYPE_INT) typeStr = "INT";
+			else if (desc->type == SANE_TYPE_FIXED) typeStr = "FIXED";
+			else if (desc->type == SANE_TYPE_STRING) typeStr = "STRING";
+			else if (desc->type == SANE_TYPE_BUTTON) typeStr = "BUTTON";
+			else if (desc->type == SANE_TYPE_GROUP) typeStr = "GROUP";
 
-			std::cout << "  [" << i << "] " << desc->name << " (" << typeStr << ")";
-			if (desc->title) std::cout << " - " << desc->title;
+			std::cout << "  [" << i << "] " << desc->name << " (" << typeStr << ")\n";
 
 			// Print string constraints if available
 			if (desc->type == SANE_TYPE_STRING && desc->constraint_type == SANE_CONSTRAINT_STRING_LIST) {
-				std::cout << "\n      Values: ";
+				std::cout << "      Values: ";
 				for (int j = 0; desc->constraint.string_list[j] != nullptr; ++j) {
 					if (j > 0) std::cout << ", ";
-					std::cout << "\"" << desc->constraint.string_list[j] << "\"";
+					std::cout << desc->constraint.string_list[j];
 				}
+				std::cout << "\n";
 			}
-			std::cout << "\n";
 		}
-		std::cout << "[SANE] ========================================\n";
 	}
 
 	// Try to set option regardless of type - auto-detect and convert
@@ -345,8 +341,6 @@ private:
 			if (status == SANE_STATUS_GOOD) {
 				std::cout << "[SANE] Set " << optionName << " successfully\n";
 				return true;
-			} else {
-				std::cout << "[SANE] Failed to set " << optionName << " (status=" << status << ")\n";
 			}
 		}
 		return false;
@@ -443,14 +437,13 @@ private:
 	}
 
 	void EnableDuplex() {
-		std::cout << "[SANE] Attempting to enable duplex scanning...\n";
+		std::cout << "[SANE] Enabling duplex...\n";
 
 		// Try bool options
 		if (SetSaneOptionBool("duplex", SANE_TRUE)) return;
 		if (SetSaneOptionBool("adf-duplex", SANE_TRUE)) return;
 		if (SetSaneOptionBool("both-sides", SANE_TRUE)) return;
 
-		// Try string options with various values
 		// Source selection
 		if (SetSaneOptionString("source", "ADF Duplex")) return;
 		if (SetSaneOptionString("source", "Duplex")) return;
@@ -460,7 +453,6 @@ private:
 		// ADF mode selection
 		if (SetSaneOptionString("adf-mode", "Duplex")) return;
 		if (SetSaneOptionString("adf-mode", "Both")) return;
-		if (SetSaneOptionString("adf_mode", "Duplex")) return;
 
 		// Scan source
 		if (SetSaneOptionString("scan-source", "ADF Duplex")) return;
@@ -469,14 +461,12 @@ private:
 		// Side selection (Canon specific)
 		if (SetSaneOptionString("side", "Duplex")) return;
 		if (SetSaneOptionString("side", "Both")) return;
-		if (SetSaneOptionString("scan-side", "Both")) return;
 
 		// Try auto-detect method
 		if (SetSaneOptionAuto("duplex", "Duplex", 1)) return;
 		if (SetSaneOptionAuto("source", "ADF Duplex", 1)) return;
 
-		std::cout << "[SANE] WARNING: Duplex option not found or not supported!\n";
-		std::cout << "[SANE] Printing all available options for debugging:\n";
+		std::cout << "[SANE] Duplex not found, printing options:\n";
 		PrintAllOptions();
 	}
 

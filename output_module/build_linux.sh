@@ -1,6 +1,5 @@
 #!/bin/sh
 # Build script for output_module on Linux (sh-compatible)
-set -e
 
 echo "========================================"
 echo "Building output_module (PDF/ZIP generator)"
@@ -38,7 +37,7 @@ fi
 echo "[OK] pybind11 found"
 
 # Get pybind11 cmake directory
-PYBIND11_DIR=$(python3 -m pybind11 --cmakedir 2>/dev/null || echo "")
+PYBIND11_DIR=$(python3 -m pybind11 --cmakedir 2>/dev/null)
 if [ -z "$PYBIND11_DIR" ]; then
     echo "[ERROR] Could not get pybind11 cmake directory"
     exit 1

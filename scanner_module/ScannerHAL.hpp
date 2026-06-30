@@ -525,8 +525,8 @@ public:
 
 		// IMPORTANT: Set source/duplex FIRST before other options
 		EnableDuplex();
-		SetResolution(100);
-		SetScanArea(255, 385);  // ~1000x1500 pixels at 100 DPI
+		SetResolution(250);
+		SetScanArea(255, 300);  // ~1000x1500 pixels at 100 DPI
 		return true;
 	}
 

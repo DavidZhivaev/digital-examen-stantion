@@ -15,7 +15,7 @@ inline constexpr SizeType PDF_HEADER_SIZE{64};
 inline constexpr SizeType PDF_BUFFER_SIZE{1ULL << 20};
 
 template<SizeType N>
-constexpr auto writeBytes(LinearBuffer<N>& buf, const char* str) noexcept -> SizeType {
+auto writeBytes(LinearBuffer<N>& buf, const char* str) noexcept -> SizeType {
     SizeType written{0};
     while (str[written] != '\0') {
         buf.append(static_cast<ByteType>(str[written]));
@@ -25,13 +25,13 @@ constexpr auto writeBytes(LinearBuffer<N>& buf, const char* str) noexcept -> Siz
 }
 
 template<SizeType N>
-constexpr auto writeInt(LinearBuffer<N>& buf, int value) noexcept -> SizeType {
+auto writeInt(LinearBuffer<N>& buf, int value) noexcept -> SizeType {
     auto str{intToString(value)};
     return buf.append(str.data(), str.size());
 }
 
 template<SizeType N>
-constexpr auto writeFloat(LinearBuffer<N>& buf, float value, int precision = 2) noexcept -> SizeType {
+auto writeFloat(LinearBuffer<N>& buf, float value, int precision = 2) noexcept -> SizeType {
     int intPart{static_cast<int>(value)};
     float fracPart{value - static_cast<float>(intPart)};
     if (fracPart < 0) {
@@ -63,7 +63,7 @@ constexpr auto writeFloat(LinearBuffer<N>& buf, float value, int precision = 2) 
 }
 
 template<SizeType N>
-constexpr auto writeLine(LinearBuffer<N>& buf, const char* str) noexcept -> SizeType {
+auto writeLine(LinearBuffer<N>& buf, const char* str) noexcept -> SizeType {
     SizeType written{writeBytes(buf, str)};
     buf.append('\n');
     return written + 1;
@@ -103,7 +103,7 @@ public:
     }
 
     template<SizeType N>
-    constexpr auto writeXref(LinearBuffer<N>& buf) const noexcept -> SizeType {
+    auto writeXref(LinearBuffer<N>& buf) const noexcept -> SizeType {
         SizeType written{0};
 
         written += writeLine(buf, "xref");

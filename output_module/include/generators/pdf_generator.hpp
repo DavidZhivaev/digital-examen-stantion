@@ -160,9 +160,9 @@ private:
         writeFloat(streamContent, scaledWidth);
         writeBytes(streamContent, " 0 0 ");
         writeFloat(streamContent, scaledHeight);
-        outputBuffer_.append(' ');
+        streamContent.append(' ');
         writeFloat(streamContent, offsetX);
-        outputBuffer_.append(' ');
+        streamContent.append(' ');
         writeFloat(streamContent, offsetY);
         writeBytes(streamContent, " cm /Im0 Do Q");
 

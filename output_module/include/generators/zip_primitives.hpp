@@ -90,13 +90,13 @@ inline constexpr std::array<std::uint32_t, 256> CRC32_TABLE = [] {
 }
 
 template<SizeType N>
-constexpr auto writeLE16(LinearBuffer<N>& buf, std::uint16_t value) noexcept -> void {
+auto writeLE16(LinearBuffer<N>& buf, std::uint16_t value) noexcept -> void {
     buf.append(static_cast<ByteType>(value & 0xFF));
     buf.append(static_cast<ByteType>((value >> 8) & 0xFF));
 }
 
 template<SizeType N>
-constexpr auto writeLE32(LinearBuffer<N>& buf, std::uint32_t value) noexcept -> void {
+auto writeLE32(LinearBuffer<N>& buf, std::uint32_t value) noexcept -> void {
     buf.append(static_cast<ByteType>(value & 0xFF));
     buf.append(static_cast<ByteType>((value >> 8) & 0xFF));
     buf.append(static_cast<ByteType>((value >> 16) & 0xFF));
@@ -104,7 +104,7 @@ constexpr auto writeLE32(LinearBuffer<N>& buf, std::uint32_t value) noexcept -> 
 }
 
 template<SizeType BufferSize>
-constexpr auto writeLocalFileHeader(
+auto writeLocalFileHeader(
     LinearBuffer<BufferSize>& buf,
     const char* fileName,
     SizeType fileNameLen,
@@ -132,7 +132,7 @@ constexpr auto writeLocalFileHeader(
 }
 
 template<SizeType BufferSize>
-constexpr auto writeCentralDirHeader(
+auto writeCentralDirHeader(
     LinearBuffer<BufferSize>& buf,
     const char* fileName,
     SizeType fileNameLen,
@@ -167,7 +167,7 @@ constexpr auto writeCentralDirHeader(
 }
 
 template<SizeType BufferSize>
-constexpr auto writeEndCentralDir(
+auto writeEndCentralDir(
     LinearBuffer<BufferSize>& buf,
     std::uint16_t entryCount,
     std::uint32_t centralDirSize,

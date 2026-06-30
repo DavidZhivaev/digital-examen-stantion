@@ -7,6 +7,7 @@
 #include "../core/file_handle.hpp"
 #include "../core/sheet_data.hpp"
 #include <array>
+#include <vector>
 #include <cstring>
 
 namespace output_module::generators {
@@ -14,8 +15,8 @@ namespace output_module::generators {
 using namespace core;
 using namespace pdf;
 
-inline constexpr SizeType IMAGE_READ_BUFFER_SIZE{1ULL << 20};
-inline constexpr SizeType PDF_WRITE_BUFFER_SIZE{1ULL << 22};
+inline constexpr SizeType IMAGE_READ_BUFFER_SIZE{4ULL << 20};  // 4MB for images
+inline constexpr SizeType PDF_WRITE_BUFFER_SIZE{1ULL << 21};   // 2MB for PDF output
 
 template<SizeType MaxPages = MAX_SHEETS>
 class alignas(CACHE_LINE_SIZE) PdfGenerator {
@@ -226,7 +227,7 @@ public:
         xref_.addEntry(0);
 
         StaticVector<int, MaxPages> pageRefs{};
-        std::array<ByteType, IMAGE_READ_BUFFER_SIZE> imageBuffer{};
+        std::vector<ByteType> imageBuffer(IMAGE_READ_BUFFER_SIZE);
 
         int pagesObjNum{nextObjectNum_++};
 

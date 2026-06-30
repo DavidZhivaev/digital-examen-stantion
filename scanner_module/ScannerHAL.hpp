@@ -151,7 +151,7 @@ public:
 		m_source.Set(source, true);
 
 		DTWAIN_SetImageInfo(m_source.Get(), FALSE);
-		DTWAIN_SetResolution(m_source.Get(), 100.0);
+		DTWAIN_SetResolution(m_source.Get(), 50.0);
 		DTWAIN_SetPixelType(m_source.Get(), DTWAIN_PT_RGB);
 		DTWAIN_EnableDuplex(m_source.Get(), TRUE);
 

@@ -108,7 +108,7 @@ private:
             return result;
         }
 
-        createDirectory(outputDir_);
+        (void)createDirectory(outputDir_);
 
         auto pdfPath{buildPdfPath(titleBarcode)};
         auto pdfFilename{buildPdfFilename(titleBarcode)};

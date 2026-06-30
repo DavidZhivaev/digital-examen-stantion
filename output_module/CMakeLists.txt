@@ -69,11 +69,7 @@ if(Python3_FOUND AND pybind11_FOUND)
         output_module_headers
     )
 
-    if(MSVC)
-        target_compile_options(output_generator_cpp PRIVATE /GR-)
-    else()
-        target_compile_options(output_generator_cpp PRIVATE -fno-rtti)
-    endif()
+    # Note: pybind11 requires RTTI, so we don't disable it here
 
     install(TARGETS output_generator_cpp
         LIBRARY DESTINATION ${Python3_SITELIB}

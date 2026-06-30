@@ -11,7 +11,7 @@ auto testBasicObject() -> bool {
 
     builder.beginObject();
     builder.keyValue("name", "test");
-    builder.keyValue("value", 42LL);
+    builder.keyValue("value", static_cast<long>(42));
     builder.endObject();
 
     auto* data{reinterpret_cast<const char*>(builder.data())};
@@ -32,7 +32,7 @@ auto testNestedObject() -> bool {
 
     builder.beginObject();
     builder.keyBeginObject("outer");
-    builder.keyValue("inner", 123LL);
+    builder.keyValue("inner", static_cast<long>(123));
     builder.endObject();
     builder.endObject();
 

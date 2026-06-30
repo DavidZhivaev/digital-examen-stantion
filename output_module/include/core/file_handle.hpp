@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <cerrno>
 #include <utility>
 
 namespace output_module::core {

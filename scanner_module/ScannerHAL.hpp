@@ -536,22 +536,27 @@ public:
 			return;
 		}
 
+		int pageNum = 0;
 		while (true) {
 			SANE_Status status{sane_start(m_handle.Get())};
+			if (status == SANE_STATUS_NO_DOCS) {
+				std::cout << "[SANE] No more documents in ADF\n";
+				break;
+			}
 			if (status != SANE_STATUS_GOOD) [[unlikely]] {
 				std::cout << "[SANE] sane_start finished with status: " << status << "\n";
 				break;
 			}
 
+			pageNum++;
 			SANE_Parameters params{};
 			status = sane_get_parameters(m_handle.Get(), &params);
 			if (status != SANE_STATUS_GOOD) [[unlikely]] {
 				std::cerr << "[SANE] Failed to get parameters\n";
-				sane_cancel(m_handle.Get());
 				break;
 			}
 
-			std::cout << "[SANE] Scanning page: " << params.pixels_per_line << "x" << params.lines
+			std::cout << "[SANE] Scanning page " << pageNum << ": " << params.pixels_per_line << "x" << params.lines
 			          << " depth=" << params.depth << " format=" << params.format << "\n";
 
 			// Pre-allocate buffer with reasonable initial size
@@ -578,7 +583,7 @@ public:
 				status = sane_read(m_handle.Get(), heapBuffer.data() + memoryOffset, maxChunkSize, &processedBytes);
 
 				if (status == SANE_STATUS_EOF) [[unlikely]] {
-					std::cout << "[SANE] Page scan complete (EOF)\n";
+					std::cout << "[SANE] Page " << pageNum << " complete (EOF)\n";
 					break;
 				}
 				if (status != SANE_STATUS_GOOD || processedBytes == 0) [[unlikely]] {
@@ -588,7 +593,7 @@ public:
 				memoryOffset += static_cast<size_t>(processedBytes);
 			}
 
-			sane_cancel(m_handle.Get());
+			// DO NOT call sane_cancel here - it stops the ADF!
 
 			if (memoryOffset == 0 || bytesPerLine == 0) [[unlikely]] {
 				std::cerr << "[SANE] Empty page, skipping\n";
@@ -626,6 +631,10 @@ public:
 
 			onPageScanned(outputFrame);
 		}
+
+		// Cancel after ALL pages are done
+		sane_cancel(m_handle.Get());
+		std::cout << "[SANE] Batch scan complete, scanned " << pageNum << " pages\n";
 	}
 
 	void CloseConnection() noexcept {

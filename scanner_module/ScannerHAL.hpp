@@ -383,47 +383,92 @@ public:
 		while (true) {
 			SANE_Status status{sane_start(m_handle.Get())};
 			if (status != SANE_STATUS_GOOD) [[unlikely]] {
+				std::cout << "[SANE] sane_start finished with status: " << status << "\n";
 				break;
 			}
 
 			SANE_Parameters params{};
-			sane_get_parameters(m_handle.Get(), &params);
+			status = sane_get_parameters(m_handle.Get(), &params);
+			if (status != SANE_STATUS_GOOD) [[unlikely]] {
+				std::cerr << "[SANE] Failed to get parameters\n";
+				sane_cancel(m_handle.Get());
+				break;
+			}
 
-			// Handle unknown line count (params.lines == -1) for ADF scanners
-			std::vector<SANE_Byte> heapBuffer{};
+			std::cout << "[SANE] Scanning page: " << params.pixels_per_line << "x" << params.lines
+			          << " depth=" << params.depth << " format=" << params.format << "\n";
+
+			// Pre-allocate buffer with reasonable initial size
+			const size_t bytesPerLine = static_cast<size_t>(params.bytes_per_line);
 			const bool unknownLines = (params.lines <= 0);
-			if (!unknownLines) {
-				heapBuffer.resize(static_cast<size_t>(params.bytes_per_line) * static_cast<size_t>(params.lines));
+
+			std::vector<SANE_Byte> heapBuffer{};
+			if (unknownLines) {
+				// Reserve 10MB initially for unknown size pages
+				heapBuffer.reserve(10 * 1024 * 1024);
+			} else {
+				heapBuffer.resize(bytesPerLine * static_cast<size_t>(params.lines));
 			}
 
 			size_t memoryOffset{0};
-			constexpr SANE_Int maxChunkSize{32 * 1024};
+			constexpr SANE_Int maxChunkSize{64 * 1024};
 			SANE_Int processedBytes{0};
 
 			while (true) {
-				if (unknownLines) {
-					heapBuffer.resize(memoryOffset + maxChunkSize);
+				if (unknownLines && memoryOffset + maxChunkSize > heapBuffer.size()) {
+					heapBuffer.resize(heapBuffer.size() + 1024 * 1024); // Grow by 1MB
 				}
+
 				status = sane_read(m_handle.Get(), heapBuffer.data() + memoryOffset, maxChunkSize, &processedBytes);
-				if (status == SANE_STATUS_EOF || processedBytes == 0) [[unlikely]] {
+
+				if (status == SANE_STATUS_EOF) [[unlikely]] {
+					std::cout << "[SANE] Page scan complete (EOF)\n";
+					break;
+				}
+				if (status != SANE_STATUS_GOOD || processedBytes == 0) [[unlikely]] {
+					std::cout << "[SANE] Read finished: status=" << status << " bytes=" << processedBytes << "\n";
 					break;
 				}
 				memoryOffset += static_cast<size_t>(processedBytes);
 			}
 
-			if (memoryOffset == 0 || params.bytes_per_line <= 0) [[unlikely]] {
+			sane_cancel(m_handle.Get());
+
+			if (memoryOffset == 0 || bytesPerLine == 0) [[unlikely]] {
+				std::cerr << "[SANE] Empty page, skipping\n";
 				continue;
 			}
 
 			const int actualLines = unknownLines
-				? static_cast<int>(memoryOffset / static_cast<size_t>(params.bytes_per_line))
+				? static_cast<int>(memoryOffset / bytesPerLine)
 				: params.lines;
 
-			cv::Mat linuxRgbFrame{actualLines, params.pixels_per_line, CV_8UC3, heapBuffer.data()};
-			cv::Mat standardBgrFrame{};
-			cv::cvtColor(linuxRgbFrame, standardBgrFrame, cv::COLOR_RGB2BGR);
+			// Trim buffer to actual size
+			const size_t actualSize = bytesPerLine * static_cast<size_t>(actualLines);
+			if (heapBuffer.size() > actualSize) {
+				heapBuffer.resize(actualSize);
+			}
 
-			onPageScanned(standardBgrFrame);
+			std::cout << "[SANE] Processing image: " << params.pixels_per_line << "x" << actualLines << "\n";
+
+			// Determine channels based on format
+			int cvType{CV_8UC3};
+			int channels{3};
+			if (params.format == SANE_FRAME_GRAY) {
+				cvType = CV_8UC1;
+				channels = 1;
+			}
+
+			cv::Mat frame{actualLines, params.pixels_per_line, cvType, heapBuffer.data()};
+			cv::Mat outputFrame{};
+
+			if (channels == 1) {
+				cv::cvtColor(frame, outputFrame, cv::COLOR_GRAY2BGR);
+			} else {
+				cv::cvtColor(frame, outputFrame, cv::COLOR_RGB2BGR);
+			}
+
+			onPageScanned(outputFrame);
 		}
 	}
 

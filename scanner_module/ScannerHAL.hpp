@@ -439,35 +439,34 @@ private:
 	void EnableDuplex() {
 		std::cout << "[SANE] Enabling duplex...\n";
 
-		// Try bool options
-		if (SetSaneOptionBool("duplex", SANE_TRUE)) return;
-		if (SetSaneOptionBool("adf-duplex", SANE_TRUE)) return;
-		if (SetSaneOptionBool("both-sides", SANE_TRUE)) return;
+		// First set the source to ADF Duplex
+		bool sourceSet = false;
+		if (SetSaneOptionString("source", "ADF Duplex")) sourceSet = true;
+		else if (SetSaneOptionString("source", "Duplex")) sourceSet = true;
+		else if (SetSaneOptionString("source", "ADF Front and Back")) sourceSet = true;
 
-		// Source selection
-		if (SetSaneOptionString("source", "ADF Duplex")) return;
-		if (SetSaneOptionString("source", "Duplex")) return;
-		if (SetSaneOptionString("source", "ADF Front and Back")) return;
-		if (SetSaneOptionString("source", "ADF")) return;
+		if (sourceSet) {
+			std::cout << "[SANE] Source set to duplex mode\n";
+		}
 
-		// ADF mode selection
-		if (SetSaneOptionString("adf-mode", "Duplex")) return;
-		if (SetSaneOptionString("adf-mode", "Both")) return;
+		// Also try to enable duplex boolean if it exists (some scanners need both)
+		SetSaneOptionBool("duplex", SANE_TRUE);
+		SetSaneOptionBool("adf-duplex", SANE_TRUE);
+		SetSaneOptionBool("both-sides", SANE_TRUE);
 
-		// Scan source
-		if (SetSaneOptionString("scan-source", "ADF Duplex")) return;
-		if (SetSaneOptionString("scan-source", "Duplex")) return;
+		// Try ADF mode options
+		SetSaneOptionString("adf-mode", "Duplex");
+		SetSaneOptionString("side", "Duplex");
+		SetSaneOptionString("side", "Both");
 
-		// Side selection (Canon specific)
-		if (SetSaneOptionString("side", "Duplex")) return;
-		if (SetSaneOptionString("side", "Both")) return;
+		// Try int option (some scanners use 1=simplex, 2=duplex)
+		SetSaneOptionInt("duplex", 1);
+		SetSaneOptionInt("sides", 2);
 
-		// Try auto-detect method
-		if (SetSaneOptionAuto("duplex", "Duplex", 1)) return;
-		if (SetSaneOptionAuto("source", "ADF Duplex", 1)) return;
-
-		std::cout << "[SANE] Duplex not found, printing options:\n";
-		PrintAllOptions();
+		if (!sourceSet) {
+			std::cout << "[SANE] WARNING: Could not set duplex source!\n";
+			PrintAllOptions();
+		}
 	}
 
 public:
@@ -524,9 +523,10 @@ public:
 		std::cout << "[SANE] Connected to scanner: " << scannerName << "\n";
 		PrintAllOptions();
 
+		// IMPORTANT: Set source/duplex FIRST before other options
+		EnableDuplex();
 		SetResolution(100);
 		SetScanArea(255, 385);  // ~1000x1500 pixels at 100 DPI
-		EnableDuplex();
 		return true;
 	}
 

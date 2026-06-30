@@ -151,7 +151,7 @@ public:
 		m_source.Set(source, true);
 
 		DTWAIN_SetImageInfo(m_source.Get(), FALSE);
-		DTWAIN_SetResolution(m_source.Get(), 300.0);
+		DTWAIN_SetResolution(m_source.Get(), 100.0);
 		DTWAIN_SetPixelType(m_source.Get(), DTWAIN_PT_RGB);
 		DTWAIN_EnableDuplex(m_source.Get(), TRUE);
 
@@ -311,6 +311,36 @@ private:
 		return false;
 	}
 
+	bool SetSaneOptionInt(const char* optionName, SANE_Int value) {
+		if (!m_handle.IsValid()) return false;
+
+		SANE_Int numOptions{0};
+		sane_control_option(m_handle.Get(), 0, SANE_ACTION_GET_VALUE, &numOptions, nullptr);
+
+		for (SANE_Int i = 1; i < numOptions; ++i) {
+			const SANE_Option_Descriptor* desc = sane_get_option_descriptor(m_handle.Get(), i);
+			if (desc && desc->name && std::strcmp(desc->name, optionName) == 0) {
+				if (desc->type == SANE_TYPE_INT || desc->type == SANE_TYPE_FIXED) {
+					SANE_Int info{0};
+					SANE_Word val = (desc->type == SANE_TYPE_FIXED) ? SANE_FIX(value) : value;
+					if (sane_control_option(m_handle.Get(), i, SANE_ACTION_SET_VALUE,
+						&val, &info) == SANE_STATUS_GOOD) {
+						std::cout << "[SANE] Set " << optionName << " = " << value << "\n";
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	void SetResolution(SANE_Int dpi) {
+		if (SetSaneOptionInt("resolution", dpi)) return;
+		if (SetSaneOptionInt("x-resolution", dpi)) return;
+		if (SetSaneOptionInt("y-resolution", dpi)) return;
+		std::cout << "[SANE] Resolution option not found\n";
+	}
+
 	void EnableDuplex() {
 		// Try common duplex option names used by different SANE backends
 		if (SetSaneOptionBool("duplex", SANE_TRUE)) return;
@@ -370,6 +400,7 @@ public:
 		}
 
 		m_handle.Set(handle, true);
+		SetResolution(100);
 		EnableDuplex();
 		return true;
 	}
